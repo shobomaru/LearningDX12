@@ -5,13 +5,13 @@
 #include <dxgi1_4.h>
 #include <d3d12.h>
 #include "d3dx12.h"
-#include <d3dcompiler.h>
 #include <DirectXMath.h>
 #include <vector>
+#include <dxcapi.h>
 
 #pragma comment(lib, "dxgi.lib")
 #pragma comment(lib, "d3d12.lib")
-#pragma comment(lib, "d3dcompiler.lib")
+#pragma comment(lib, "dxcompiler.lib")
 
 using namespace std;
 using Microsoft::WRL::ComPtr;
@@ -223,7 +223,7 @@ public:
 		CHK(D3D12SerializeRootSignature(&rootSigDesc, D3D_ROOT_SIGNATURE_VERSION_1, &rootSigBlob, &rootSigError));
 		CHK(mDevice->CreateRootSignature(0, rootSigBlob->GetBufferPointer(), rootSigBlob->GetBufferSize(), IID_PPV_ARGS(&mSceneRootSig)));
 
-		static const char* shaderCodeShadowVS = R"#(
+		static const char shaderCodeShadowVS[] = R"#(
 cbuffer CShadow {
 	float4x4 ShadowViewProj;
 };
@@ -232,7 +232,7 @@ float4 main(float3 position : POSITION) : SV_Position {
 }
 )#";
 
-		static const char* shaderCodeSceneVS = R"#(
+		static const char shaderCodeSceneVS[] = R"#(
 cbuffer CScene {
 	float4x4 ViewProj;
 };
@@ -250,7 +250,7 @@ Output main(float3 position : Position, float3 normal : Normal) {
 }
 )#";
 
-		static const char* shaderCodeScenePS = R"#(
+		static const char shaderCodeScenePS[] = R"#(
 Texture2D<float> ShadowMap;
 cbuffer CScene : register(b0) {
 	float4x4 ViewProj;
@@ -280,26 +280,42 @@ float4 main(Input input) : SV_Target {
 }
 )#";
 
-		ComPtr<ID3DBlob> shaderBlobShadowVS, shaderBlobSceneVS, shaderBlobScenePS;
-		ComPtr<ID3DBlob> shaderError;
-		D3DCompile(shaderCodeShadowVS, strlen(shaderCodeShadowVS) - 1, nullptr, nullptr, nullptr, "main", "vs_5_1",
-			D3DCOMPILE_ALL_RESOURCES_BOUND, 0, &shaderBlobShadowVS, &shaderError);
-		if (shaderError) {
-			OutputDebugStringA(reinterpret_cast<char*>(shaderError->GetBufferPointer()));
+		ComPtr<IDxcCompiler> dxc;
+		CHK(DxcCreateInstance(CLSID_DxcCompiler, IID_PPV_ARGS(&dxc)));
+		ComPtr<IDxcLibrary> dxcLib;
+		CHK(DxcCreateInstance(CLSID_DxcLibrary, IID_PPV_ARGS(&dxcLib)));
+
+		ComPtr<IDxcBlobEncoding> dxcTxtShadowVS, dxcTxtSceneVS, dxcTxtScenePS;
+		CHK(dxcLib->CreateBlobWithEncodingFromPinned(shaderCodeShadowVS, _countof(shaderCodeShadowVS) - 1, CP_UTF8, &dxcTxtShadowVS));
+		CHK(dxcLib->CreateBlobWithEncodingFromPinned(shaderCodeSceneVS, _countof(shaderCodeSceneVS) - 1, CP_UTF8, &dxcTxtSceneVS));
+		CHK(dxcLib->CreateBlobWithEncodingFromPinned(shaderCodeScenePS, _countof(shaderCodeScenePS) - 1, CP_UTF8, &dxcTxtScenePS));
+
+		ComPtr<IDxcBlob> dxcBlobShadowVS, dxcBlobSceneVS, dxcBlobScenePS;
+		ComPtr<IDxcBlobEncoding> dxcError;
+		ComPtr<IDxcOperationResult> dxcRes;
+		const wchar_t* shaderArgs[] = { L"-Zi", L"-all_resources_bound" };
+
+		dxc->Compile(dxcTxtShadowVS.Get(), nullptr, L"main", L"vs_6_0", shaderArgs, _countof(shaderArgs), nullptr, 0, nullptr, &dxcRes);
+		dxcRes->GetErrorBuffer(&dxcError);
+		if (dxcError->GetBufferSize()) {
+			OutputDebugStringA(reinterpret_cast<char*>(dxcError->GetBufferPointer()));
 			throw runtime_error("Shader compile error.");
 		}
-		D3DCompile(shaderCodeSceneVS, strlen(shaderCodeSceneVS) - 1, nullptr, nullptr, nullptr, "main", "vs_5_1",
-			D3DCOMPILE_ALL_RESOURCES_BOUND, 0, &shaderBlobSceneVS, &shaderError);
-		if (shaderError) {
-			OutputDebugStringA(reinterpret_cast<char*>(shaderError->GetBufferPointer()));
+		dxcRes->GetResult(&dxcBlobShadowVS);
+		dxc->Compile(dxcTxtSceneVS.Get(), nullptr, L"main", L"vs_6_0", shaderArgs, _countof(shaderArgs), nullptr, 0, nullptr, &dxcRes);
+		dxcRes->GetErrorBuffer(&dxcError);
+		if (dxcError->GetBufferSize()) {
+			OutputDebugStringA(reinterpret_cast<char*>(dxcError->GetBufferPointer()));
 			throw runtime_error("Shader compile error.");
 		}
-		D3DCompile(shaderCodeScenePS, strlen(shaderCodeScenePS) - 1, nullptr, nullptr, nullptr, "main", "ps_5_1",
-			D3DCOMPILE_ALL_RESOURCES_BOUND, 0, &shaderBlobScenePS, &shaderError);
-		if (shaderError) {
-			OutputDebugStringA(reinterpret_cast<char*>(shaderError->GetBufferPointer()));
+		dxcRes->GetResult(&dxcBlobSceneVS);
+		dxc->Compile(dxcTxtScenePS.Get(), nullptr, L"main", L"ps_6_0", shaderArgs, _countof(shaderArgs), nullptr, 0, nullptr, &dxcRes);
+		dxcRes->GetErrorBuffer(&dxcError);
+		if (dxcError->GetBufferSize()) {
+			OutputDebugStringA(reinterpret_cast<char*>(dxcError->GetBufferPointer()));
 			throw runtime_error("Shader compile error.");
 		}
+		dxcRes->GetResult(&dxcBlobScenePS);
 
 		D3D12_INPUT_ELEMENT_DESC ieDesc[] = {
 			{ "POSITION", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0, 0, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0 },
@@ -313,7 +329,7 @@ float4 main(Input input) : SV_Target {
 
 		D3D12_GRAPHICS_PIPELINE_STATE_DESC psoDesc = {};
 		psoDesc.pRootSignature = mShadowRootSig.Get();
-		psoDesc.VS = CD3DX12_SHADER_BYTECODE(shaderBlobShadowVS.Get());
+		psoDesc.VS = CD3DX12_SHADER_BYTECODE(dxcBlobShadowVS->GetBufferPointer(), dxcBlobShadowVS->GetBufferSize());
 		psoDesc.PS = CD3DX12_SHADER_BYTECODE(nullptr, 0);
 		psoDesc.InputLayout = { ieDesc, _countof(ieDesc) };
 		psoDesc.IBStripCutValue = D3D12_INDEX_BUFFER_STRIP_CUT_VALUE_DISABLED;
@@ -328,8 +344,8 @@ float4 main(Input input) : SV_Target {
 
 		psoDesc = {};
 		psoDesc.pRootSignature = mSceneRootSig.Get();
-		psoDesc.VS = CD3DX12_SHADER_BYTECODE(shaderBlobSceneVS.Get());
-		psoDesc.PS = CD3DX12_SHADER_BYTECODE(shaderBlobScenePS.Get());
+		psoDesc.VS = CD3DX12_SHADER_BYTECODE(dxcBlobSceneVS->GetBufferPointer(), dxcBlobSceneVS->GetBufferSize());
+		psoDesc.PS = CD3DX12_SHADER_BYTECODE(dxcBlobScenePS->GetBufferPointer(), dxcBlobScenePS->GetBufferSize());
 		psoDesc.InputLayout = { ieDesc, _countof(ieDesc) };
 		psoDesc.IBStripCutValue = D3D12_INDEX_BUFFER_STRIP_CUT_VALUE_DISABLED;
 		psoDesc.PrimitiveTopologyType = D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE;
