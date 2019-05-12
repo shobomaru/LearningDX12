@@ -280,6 +280,8 @@ float4 main(Input input) : SV_Target {
 }
 )#";
 
+		SetDllDirectory(L"../dll/");
+
 		ComPtr<IDxcCompiler> dxc;
 		CHK(DxcCreateInstance(CLSID_DxcCompiler, IID_PPV_ARGS(&dxc)));
 		ComPtr<IDxcLibrary> dxcLib;
