@@ -617,7 +617,7 @@ float4 main(Input input) : SV_Target {
 		mCmdList->SetPipelineState(mScenePSO.Get());
 		mCmdList->SetGraphicsRootDescriptorTable(0, svSceneVS); // VS, CBV_SRV_UAV
 		mCmdList->SetGraphicsRootDescriptorTable(1, svScenePS); // PS, CBV_SRV_UAV
-		mCmdList->SetGraphicsRoot32BitConstant(2, 0, 0); // PS, RootConstant
+		mCmdList->SetGraphicsRoot32BitConstant(2, static_cast<UINT>(mBindlessTextureIndex), 0); // PS, RootConstant
 		//mCmdList->SetGraphicsRootDescriptorTable(2, samplerDefault); // PS, Sampler
 		mCmdList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
 		mCmdList->IASetVertexBuffers(0, 1, &mVBView);
@@ -672,6 +672,7 @@ private:
 	//DirectX::XMVECTOR mCameraPos = DirectX::XMVectorSet(0.0f, 0.0f, -4.0f, 0);
 	DirectX::XMVECTOR mCameraTarget = DirectX::XMVectorSet(0, 0, 0, 0);
 	DirectX::XMVECTOR mCameraUp = DirectX::XMVectorSet(0, 1, 0, 0);
+	float mBindlessTextureIndex = 0;
 
 public:
 	void MoveCamera(float forward, float trans, float rot)
@@ -706,6 +707,12 @@ public:
 			auto newVec = DirectX::XMVectorSet(newX * length, DirectX::XMVectorGetY(vec), newZ * length, 0);
 			mCameraPos = DirectX::XMVectorAdd(mCameraTarget, newVec);
 		}
+	}
+
+	void ChangeTexture(bool forward)
+	{
+		float newIndex = forward ? (mBindlessTextureIndex + 0.1f) : (mBindlessTextureIndex - 0.1f);
+		mBindlessTextureIndex = max(0.0f, min((float)MAX_BINDLESS_RESOURCE, newIndex));
 	}
 };
 
@@ -798,6 +805,12 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int)
 				}
 				if (keyState['D'] & 0x80) {
 					d3d.MoveCamera(0, 0, -0.04f);
+				}
+				if (keyState[VK_RIGHT] & 0x80) {
+					d3d.ChangeTexture(true);
+				}
+				if (keyState[VK_LEFT] & 0x80) {
+					d3d.ChangeTexture(false);
 				}
 				d3d.Draw();
 				d3d.Present();
