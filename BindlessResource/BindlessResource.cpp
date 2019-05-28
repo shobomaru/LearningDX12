@@ -381,8 +381,8 @@ float4 main(Input input) : SV_Target {
 		{
 			transitions[i] = CD3DX12_RESOURCE_BARRIER::Transition(
 				mBindlessResource[i].Get(), D3D12_RESOURCE_STATE_COPY_DEST, D3D12_RESOURCE_STATE_COMMON, D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES);
-			mCmdListCopy->ResourceBarrier(1, &transitions[i]);
 		}
+		mCmdListCopy->ResourceBarrier(MAX_DEFINED_RESOURCE, transitions);
 
 		descHeapDesc = {};
 		descHeapDesc.Type = D3D12_DESCRIPTOR_HEAP_TYPE_RTV;
