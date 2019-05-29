@@ -256,7 +256,13 @@ struct Input {
 	float3 normal : Normal;
 };
 float4 main(Input input) : SV_Target {
-	float4 color = ColorMap[RootParamOffset].Load(int3(0, 0, 0));
+	float4 color;
+	if (RootParamOffset < 8) {
+		color = ColorMap[RootParamOffset].Load(int3(0, 0, 0));
+	} else {
+		uint index = ((uint)(input.position.x) + (uint)(input.position.y)) % 8;
+		color = ColorMap[ NonUniformResourceIndex(index) ].Load(int3(0, 0, 0));
+	}
 	float intensity = input.normal.y * 0.5 + 0.5;
 	color.xyz *= intensity;
 	return color;
@@ -712,7 +718,7 @@ public:
 	void ChangeTexture(bool forward)
 	{
 		float newIndex = forward ? (mBindlessTextureIndex + 0.1f) : (mBindlessTextureIndex - 0.1f);
-		mBindlessTextureIndex = max(0.0f, min((float)MAX_BINDLESS_RESOURCE, newIndex));
+		mBindlessTextureIndex = max(0.0f, min((float)MAX_BINDLESS_RESOURCE + 1.0f, newIndex));
 	}
 };
 
