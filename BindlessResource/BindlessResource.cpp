@@ -46,7 +46,6 @@ class D3D
 	ComPtr<ID3D12CommandQueue> mCmdQueue;
 	ComPtr<IDXGISwapChain3> mSwapChain;
 	ComPtr<ID3D12GraphicsCommandList> mCmdList;
-	ComPtr<ID3D12GraphicsCommandList1> mCmdList1;
 	uint64_t mFrameCount = 300;
 	ComPtr<ID3D12Fence> mFence;
 	ComPtr<ID3D12Resource> mSwapChainTex[BUFFER_COUNT];
@@ -185,7 +184,6 @@ public:
 
 		CHK(mDevice->CreateCommandList(0, D3D12_COMMAND_LIST_TYPE_DIRECT, mCmdAlloc[0].Get(), nullptr, IID_PPV_ARGS(&mCmdList)));
 		mCmdList->Close();
-		CHK(mCmdList.As(&mCmdList1));
 
 		CHK(mDevice->CreateFence(0, D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(&mFence)));
 
