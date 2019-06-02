@@ -13,6 +13,8 @@ Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "ShadowMap", "ShadowMap\Shad
 EndProject
 Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "BindlessResource", "BindlessResource\BindlessResource.vcxproj", "{42E13997-6EAF-497E-9169-0193EB28C88B}"
 EndProject
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "ExistingHeap", "ExistingHeap\ExistingHeap.vcxproj", "{57BDBF27-C768-4984-8967-9940B3CAC29E}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|x64 = Debug|x64
@@ -61,6 +63,14 @@ Global
 		{42E13997-6EAF-497E-9169-0193EB28C88B}.Release|x64.Build.0 = Release|x64
 		{42E13997-6EAF-497E-9169-0193EB28C88B}.Release|x86.ActiveCfg = Release|Win32
 		{42E13997-6EAF-497E-9169-0193EB28C88B}.Release|x86.Build.0 = Release|Win32
+		{57BDBF27-C768-4984-8967-9940B3CAC29E}.Debug|x64.ActiveCfg = Debug|x64
+		{57BDBF27-C768-4984-8967-9940B3CAC29E}.Debug|x64.Build.0 = Debug|x64
+		{57BDBF27-C768-4984-8967-9940B3CAC29E}.Debug|x86.ActiveCfg = Debug|Win32
+		{57BDBF27-C768-4984-8967-9940B3CAC29E}.Debug|x86.Build.0 = Debug|Win32
+		{57BDBF27-C768-4984-8967-9940B3CAC29E}.Release|x64.ActiveCfg = Release|x64
+		{57BDBF27-C768-4984-8967-9940B3CAC29E}.Release|x64.Build.0 = Release|x64
+		{57BDBF27-C768-4984-8967-9940B3CAC29E}.Release|x86.ActiveCfg = Release|Win32
+		{57BDBF27-C768-4984-8967-9940B3CAC29E}.Release|x86.Build.0 = Release|Win32
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
