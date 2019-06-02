@@ -15,6 +15,8 @@ Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "BindlessResource", "Bindles
 EndProject
 Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "ExistingHeap", "ExistingHeap\ExistingHeap.vcxproj", "{57BDBF27-C768-4984-8967-9940B3CAC29E}"
 EndProject
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "RenderPass", "RenderPass\RenderPass.vcxproj", "{62FBD594-64B4-467A-A32C-96097F95CE60}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|x64 = Debug|x64
@@ -71,6 +73,14 @@ Global
 		{57BDBF27-C768-4984-8967-9940B3CAC29E}.Release|x64.Build.0 = Release|x64
 		{57BDBF27-C768-4984-8967-9940B3CAC29E}.Release|x86.ActiveCfg = Release|Win32
 		{57BDBF27-C768-4984-8967-9940B3CAC29E}.Release|x86.Build.0 = Release|Win32
+		{62FBD594-64B4-467A-A32C-96097F95CE60}.Debug|x64.ActiveCfg = Debug|x64
+		{62FBD594-64B4-467A-A32C-96097F95CE60}.Debug|x64.Build.0 = Debug|x64
+		{62FBD594-64B4-467A-A32C-96097F95CE60}.Debug|x86.ActiveCfg = Debug|Win32
+		{62FBD594-64B4-467A-A32C-96097F95CE60}.Debug|x86.Build.0 = Debug|Win32
+		{62FBD594-64B4-467A-A32C-96097F95CE60}.Release|x64.ActiveCfg = Release|x64
+		{62FBD594-64B4-467A-A32C-96097F95CE60}.Release|x64.Build.0 = Release|x64
+		{62FBD594-64B4-467A-A32C-96097F95CE60}.Release|x86.ActiveCfg = Release|Win32
+		{62FBD594-64B4-467A-A32C-96097F95CE60}.Release|x86.Build.0 = Release|Win32
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
