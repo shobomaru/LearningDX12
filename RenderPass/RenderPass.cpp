@@ -293,7 +293,7 @@ float4 main(Input input) : SV_Target {
 		ComPtr<IDxcBlob> dxcBlobShadowVS, dxcBlobSceneVS, dxcBlobScenePS;
 		ComPtr<IDxcBlobEncoding> dxcError;
 		ComPtr<IDxcOperationResult> dxcRes;
-		const wchar_t* shaderArgs[] = { L"-Zi", L"-all_resources_bound" };
+		const wchar_t* shaderArgs[] = { L"-Zi", L"-all_resources_bound", L"-Qembed_debug" };
 
 		dxc->Compile(dxcTxtShadowVS.Get(), nullptr, L"main", L"vs_6_0", shaderArgs, _countof(shaderArgs), nullptr, 0, nullptr, &dxcRes);
 		dxcRes->GetErrorBuffer(&dxcError);
