@@ -190,15 +190,16 @@ void main(uint2 id : SV_DispatchThreadID) {
 		CHK(mDevice->CreateComputePipelineState(&psoDesc, IID_PPV_ARGS(&mPSO)));
 
 		// Resource
+		auto heapProp = CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_DEFAULT);
 		auto resDesc = CD3DX12_RESOURCE_DESC::Tex2D(DXGI_FORMAT_R8G8B8A8_UNORM, WINDOW_WIDTH, WINDOW_HEIGHT, 1, 1);
 		resDesc.Flags = D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS;
 #if USE_DX12_IMPLICIT_STATE_TRANSITIONS
 		CHK(mDevice->CreateCommittedResource(
-			&CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_DEFAULT), D3D12_HEAP_FLAG_NONE, &resDesc,
+			&heapProp, D3D12_HEAP_FLAG_NONE, &resDesc,
 			D3D12_RESOURCE_STATE_COMMON, nullptr, IID_PPV_ARGS(&mOffscreenTex)));
 #else
 		CHK(mDevice->CreateCommittedResource(
-			&CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_DEFAULT), D3D12_HEAP_FLAG_NONE, &resDesc,
+			&heapProp, D3D12_HEAP_FLAG_NONE, &resDesc,
 			kDefaultAsyncResourceState, nullptr, IID_PPV_ARGS(&mOffscreenTex)));
 #endif
 

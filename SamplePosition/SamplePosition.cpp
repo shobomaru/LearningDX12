@@ -266,11 +266,12 @@ void main(uint2 id : SV_DispatchThreadID) {
 
 		// Offscreen resource
 
+		auto heapProp = CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_DEFAULT);
 		auto resDesc = CD3DX12_RESOURCE_DESC::Tex2D(DXGI_FORMAT_R8G8B8A8_UNORM, WINDOW_WIDTH / 2, WINDOW_HEIGHT / 2, 1, 1, kMsaaSample);
 		resDesc.Flags = D3D12_RESOURCE_FLAG_ALLOW_RENDER_TARGET;
 		auto clearValue = CD3DX12_CLEAR_VALUE(DXGI_FORMAT_R8G8B8A8_UNORM, kDefaultRTClearColor);
 		CHK(mDevice->CreateCommittedResource(
-			&CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_DEFAULT), D3D12_HEAP_FLAG_NONE, &resDesc,
+			&heapProp, D3D12_HEAP_FLAG_NONE, &resDesc,
 			D3D12_RESOURCE_STATE_GENERIC_READ, &clearValue, IID_PPV_ARGS(&mOffscreenTex)));
 
 		descHeapDesc = {};
@@ -321,9 +322,10 @@ void main(uint2 id : SV_DispatchThreadID) {
 		}
 
 		mVBSize = static_cast<uint32_t>(sizeof(vertices[0]) * vertices.size());
+		heapProp = CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_UPLOAD);
 		resDesc = CD3DX12_RESOURCE_DESC::Buffer(mVBSize, D3D12_RESOURCE_FLAG_DENY_SHADER_RESOURCE);
 		CHK(mDevice->CreateCommittedResource(
-			&CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_UPLOAD), D3D12_HEAP_FLAG_NONE, &resDesc,
+			&heapProp, D3D12_HEAP_FLAG_NONE, &resDesc,
 			D3D12_RESOURCE_STATE_GENERIC_READ, nullptr, IID_PPV_ARGS(&mVB)));
 		void* gpuMem;
 		CHK(mVB->Map(0, nullptr, &gpuMem));
@@ -332,17 +334,18 @@ void main(uint2 id : SV_DispatchThreadID) {
 		mIBSize = static_cast<uint32_t>(sizeof(indices[0]) * indices.size());
 		resDesc = CD3DX12_RESOURCE_DESC::Buffer(mIBSize, D3D12_RESOURCE_FLAG_DENY_SHADER_RESOURCE);
 		CHK(mDevice->CreateCommittedResource(
-			&CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_UPLOAD), D3D12_HEAP_FLAG_NONE, &resDesc,
+			&heapProp, D3D12_HEAP_FLAG_NONE, &resDesc,
 			D3D12_RESOURCE_STATE_GENERIC_READ, nullptr, IID_PPV_ARGS(&mIB)));
 		CHK(mIB->Map(0, nullptr, &gpuMem));
 		memcpy(gpuMem, indices.data(), mIBSize);
 
 		// Resolved resource
 
+		heapProp = CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_DEFAULT);
 		resDesc = CD3DX12_RESOURCE_DESC::Tex2D(DXGI_FORMAT_R8G8B8A8_UNORM, WINDOW_WIDTH, WINDOW_HEIGHT, 1, 1);
 		resDesc.Flags = D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS;
 		CHK(mDevice->CreateCommittedResource(
-			&CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_DEFAULT), D3D12_HEAP_FLAG_NONE, &resDesc,
+			&heapProp, D3D12_HEAP_FLAG_NONE, &resDesc,
 			D3D12_RESOURCE_STATE_GENERIC_READ, nullptr, IID_PPV_ARGS(&mResolvedTex)));
 
 		descHeapDesc = {};
@@ -398,8 +401,10 @@ void main(uint2 id : SV_DispatchThreadID) {
 		ib.Format = DXGI_FORMAT_R16_UINT;
 		ib.SizeInBytes = mIBSize;
 		mCmdList->IASetIndexBuffer(&ib);
-		mCmdList->RSSetViewports(1, &CD3DX12_VIEWPORT(0.0f, 0.0f, WINDOW_WIDTH / 2, WINDOW_HEIGHT / 2));
-		mCmdList->RSSetScissorRects(1, &CD3DX12_RECT(0, 0, WINDOW_WIDTH / 2, WINDOW_HEIGHT / 2));
+		auto viewport = CD3DX12_VIEWPORT(0.0f, 0.0f, WINDOW_WIDTH / 2, WINDOW_HEIGHT / 2);
+		mCmdList->RSSetViewports(1, &viewport);
+		auto scissor = CD3DX12_RECT(0, 0, WINDOW_WIDTH / 2, WINDOW_HEIGHT / 2);
+		mCmdList->RSSetScissorRects(1, &scissor);
 		auto descRTVCpuHandle = mOffscreenRTV->GetCPUDescriptorHandleForHeapStart();
 		mCmdList->OMSetRenderTargets(1, &descRTVCpuHandle, TRUE, nullptr);
 		mCmdList->DrawIndexedInstanced(6 * SphereStacks * SphereSlices, 1, 0, 0, 0);

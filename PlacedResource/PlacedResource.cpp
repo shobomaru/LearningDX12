@@ -334,24 +334,26 @@ float4 main(Input input) : SV_Target {
 
 		for (auto& cb : mConstantBuffer)
 		{
+			auto heapProp = CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_UPLOAD);
 			auto resDesc = CD3DX12_RESOURCE_DESC::Buffer(256 * (int)Constants::Max);
 			CHK(mDevice->CreateCommittedResource(
-				&CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_UPLOAD), D3D12_HEAP_FLAG_NONE, &resDesc,
+				&heapProp, D3D12_HEAP_FLAG_NONE, &resDesc,
 				D3D12_RESOURCE_STATE_GENERIC_READ, nullptr, IID_PPV_ARGS(&cb)));
 		}
 
+		auto heapProp = CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_DEFAULT);
 		auto resDesc = CD3DX12_RESOURCE_DESC::Tex2D(DXGI_FORMAT_R8G8B8A8_UNORM, WINDOW_WIDTH, WINDOW_HEIGHT, 1, 1);
 		resDesc.Flags = D3D12_RESOURCE_FLAG_ALLOW_RENDER_TARGET;
 		auto clearValue = CD3DX12_CLEAR_VALUE(DXGI_FORMAT_R8G8B8A8_UNORM, kDefaultRTClearColor);
 		CHK(mDevice->CreateCommittedResource(
-			&CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_DEFAULT), D3D12_HEAP_FLAG_NONE, &resDesc,
+			&heapProp, D3D12_HEAP_FLAG_NONE, &resDesc,
 			D3D12_RESOURCE_STATE_GENERIC_READ, &clearValue, IID_PPV_ARGS(&mSceneTex)));
 
 		//resDesc = CD3DX12_RESOURCE_DESC::Tex2D(DXGI_FORMAT_D32_FLOAT, WINDOW_WIDTH, WINDOW_HEIGHT, 1, 1);
 		//resDesc.Flags = D3D12_RESOURCE_FLAG_ALLOW_DEPTH_STENCIL | D3D12_RESOURCE_FLAG_DENY_SHADER_RESOURCE;
 		//clearValue = CD3DX12_CLEAR_VALUE(DXGI_FORMAT_D32_FLOAT, kDefaultDSClearColor);
 		//CHK(mDevice->CreateCommittedResource(
-		//	&CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_DEFAULT), D3D12_HEAP_FLAG_NONE, &resDesc,
+		//	&heapProp, D3D12_HEAP_FLAG_NONE, &resDesc,
 		//	D3D12_RESOURCE_STATE_DEPTH_WRITE, &clearValue, IID_PPV_ARGS(&mSceneZ)));
 
 		// Half-size per view rt/ds
@@ -380,26 +382,29 @@ float4 main(Input input) : SV_Target {
 				D3D12_RESOURCE_STATE_DEPTH_WRITE, &clearValue, IID_PPV_ARGS(&mPlacedZ[i])));
 		}
 
+		heapProp = CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_DEFAULT);
 		resDesc = CD3DX12_RESOURCE_DESC::Tex2D(DXGI_FORMAT_R8G8B8A8_UNORM, WINDOW_WIDTH, WINDOW_HEIGHT, 1, 1);
 		resDesc.Flags = D3D12_RESOURCE_FLAG_ALLOW_RENDER_TARGET;
 		clearValue = CD3DX12_CLEAR_VALUE(DXGI_FORMAT_R8G8B8A8_UNORM, kDefaultRTClearColor);
 		CHK(mDevice->CreateCommittedResource(
-			&CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_DEFAULT), D3D12_HEAP_FLAG_NONE, &resDesc,
+			&heapProp, D3D12_HEAP_FLAG_NONE, &resDesc,
 			D3D12_RESOURCE_STATE_GENERIC_READ, &clearValue, IID_PPV_ARGS(&mSceneTex)));
 
+		heapProp = CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_UPLOAD);
 		resDesc = CD3DX12_RESOURCE_DESC::Buffer(4 * 1024 * 1024);
 		resDesc.Flags = D3D12_RESOURCE_FLAG_DENY_SHADER_RESOURCE;
 		CHK(mDevice->CreateCommittedResource(
-			&CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_UPLOAD), D3D12_HEAP_FLAG_NONE, &resDesc,
+			&heapProp, D3D12_HEAP_FLAG_NONE, &resDesc,
 			D3D12_RESOURCE_STATE_GENERIC_READ, nullptr, IID_PPV_ARGS(&mCopyBuffer)));
 		vector<char> copyBuffer;
 		copyBuffer.reserve(resDesc.Width);
 
 		for (int i = 0; i < MAX_DEFINED_RESOURCE; ++i)
 		{
+			heapProp = CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_DEFAULT);
 			resDesc = CD3DX12_RESOURCE_DESC::Tex2D(DXGI_FORMAT_R32G32B32A32_FLOAT, 1, 1, 1, 1);
 			CHK(mDevice->CreateCommittedResource(
-				&CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_DEFAULT), D3D12_HEAP_FLAG_NONE, &resDesc,
+				&heapProp, D3D12_HEAP_FLAG_NONE, &resDesc,
 				D3D12_RESOURCE_STATE_COPY_DEST, nullptr, IID_PPV_ARGS(&mBindlessResource[i])));
 
 			static const float colors[MAX_DEFINED_RESOURCE][4] = {
@@ -543,9 +548,10 @@ float4 main(Input input) : SV_Target {
 		}
 
 		auto sizeVB = static_cast<uint32_t>(sizeof(vertices[0]) * vertices.size());
+		heapProp = CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_UPLOAD);
 		resDesc = CD3DX12_RESOURCE_DESC::Buffer(sizeVB, D3D12_RESOURCE_FLAG_DENY_SHADER_RESOURCE);
 		CHK(mDevice->CreateCommittedResource(
-			&CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_UPLOAD), D3D12_HEAP_FLAG_NONE, &resDesc,
+			&heapProp, D3D12_HEAP_FLAG_NONE, &resDesc,
 			D3D12_RESOURCE_STATE_GENERIC_READ, nullptr, IID_PPV_ARGS(&mVB)));
 		void* gpuMem;
 		CHK(mVB->Map(0, nullptr, &gpuMem));
@@ -554,7 +560,7 @@ float4 main(Input input) : SV_Target {
 		auto sizeIB = static_cast<uint32_t>(sizeof(indices[0]) * indices.size());
 		resDesc = CD3DX12_RESOURCE_DESC::Buffer(sizeIB, D3D12_RESOURCE_FLAG_DENY_SHADER_RESOURCE);
 		CHK(mDevice->CreateCommittedResource(
-			&CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_UPLOAD), D3D12_HEAP_FLAG_NONE, &resDesc,
+			&heapProp, D3D12_HEAP_FLAG_NONE, &resDesc,
 			D3D12_RESOURCE_STATE_GENERIC_READ, nullptr, IID_PPV_ARGS(&mIB)));
 		CHK(mIB->Map(0, nullptr, &gpuMem));
 		memcpy(gpuMem, indices.data(), sizeIB);
@@ -665,8 +671,10 @@ float4 main(Input input) : SV_Target {
 		mCmdList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
 		mCmdList->IASetVertexBuffers(0, 1, &mVBView);
 		mCmdList->IASetIndexBuffer(&mIBView);
-		mCmdList->RSSetViewports(1, &CD3DX12_VIEWPORT(0.0f, 0.0f, (float)WINDOW_WIDTH / 2, (float)WINDOW_HEIGHT / 2));
-		mCmdList->RSSetScissorRects(1, &CD3DX12_RECT(0, 0, WINDOW_WIDTH, WINDOW_HEIGHT));
+		auto viewport = CD3DX12_VIEWPORT(0.0f, 0.0f, (float)WINDOW_WIDTH / 2, (float)WINDOW_HEIGHT / 2);
+		mCmdList->RSSetViewports(1, &viewport);
+		auto scissor = CD3DX12_RECT(0, 0, WINDOW_WIDTH, WINDOW_HEIGHT);
+		mCmdList->RSSetScissorRects(1, &scissor);
 		mCmdList->OMSetRenderTargets(1, &rtvPlacedScene0, TRUE, &dsvPlacedScene0);
 		mCmdList->DrawIndexedInstanced(6 * SphereStacks * SphereSlices, 1, 0, 0, 0);
 
@@ -902,24 +910,25 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int)
 			BOOL r = PeekMessage(&msg, nullptr, 0, 0, PM_REMOVE);
 			if (r == 0) {
 				BYTE keyState[256] = {};
-				GetKeyboardState(keyState);
-				if (keyState['W'] & 0x80) {
-					d3d.MoveCamera(0.05f, 0, 0);
-				}
-				if (keyState['S'] & 0x80) {
-					d3d.MoveCamera(-0.05f, 0, 0);
-				}
-				if (keyState['Z'] & 0x80) {
-					d3d.MoveCamera(0, -0.05f, 0);
-				}
-				if (keyState['C'] & 0x80) {
-					d3d.MoveCamera(0, 0.05f, 0);
-				}
-				if (keyState['A'] & 0x80) {
-					d3d.MoveCamera(0, 0, 0.04f);
-				}
-				if (keyState['D'] & 0x80) {
-					d3d.MoveCamera(0, 0, -0.04f);
+				if (GetKeyboardState(keyState)) {
+					if (keyState['W'] & 0x80) {
+						d3d.MoveCamera(0.05f, 0, 0);
+					}
+					if (keyState['S'] & 0x80) {
+						d3d.MoveCamera(-0.05f, 0, 0);
+					}
+					if (keyState['Z'] & 0x80) {
+						d3d.MoveCamera(0, -0.05f, 0);
+					}
+					if (keyState['C'] & 0x80) {
+						d3d.MoveCamera(0, 0.05f, 0);
+					}
+					if (keyState['A'] & 0x80) {
+						d3d.MoveCamera(0, 0, 0.04f);
+					}
+					if (keyState['D'] & 0x80) {
+						d3d.MoveCamera(0, 0, -0.04f);
+					}
 				}
 				d3d.Draw();
 				d3d.Present();
