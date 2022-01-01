@@ -24,7 +24,6 @@ namespace
 	const int BUFFER_COUNT = 3;
 	const int MAX_BINDLESS_RESOURCE = 100;
 	const int MAX_DEFINED_RESOURCE = 8;
-	HWND g_mainWindowHandle = 0;
 };
 
 void CHK(HRESULT hr)
@@ -46,7 +45,7 @@ class D3D
 	ComPtr<ID3D12CommandQueue> mCmdQueue;
 	ComPtr<IDXGISwapChain3> mSwapChain;
 	ComPtr<ID3D12GraphicsCommandList> mCmdList;
-	uint64_t mFrameCount = 300;
+	uint64_t mFrameCount = 0;
 	ComPtr<ID3D12Fence> mFence;
 	ComPtr<ID3D12Resource> mSwapChainTex[BUFFER_COUNT];
 	ComPtr<ID3D12DescriptorHeap> mSwapChainRTVs;
@@ -183,7 +182,7 @@ public:
 		CHK(mDxgiFactory->MakeWindowAssociation(hWnd, DXGI_MWA_NO_ALT_ENTER));
 
 		CHK(mDevice->CreateCommandList(0, D3D12_COMMAND_LIST_TYPE_DIRECT, mCmdAlloc[0].Get(), nullptr, IID_PPV_ARGS(&mCmdList)));
-		mCmdList->Close();
+		CHK(mCmdList->Close());
 
 		CHK(mDevice->CreateFence(0, D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(&mFence)));
 
@@ -565,11 +564,17 @@ float4 main(Input input) : SV_Target {
 
 		// DMA
 
+		ComPtr<ID3D12Fence> fenceCopy;
+		CHK(mDevice->CreateFence(0, D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(&fenceCopy)));
+
 		CHK(mCmdListCopy->Close());
 		ID3D12GraphicsCommandList* cmdLists[] = { mCmdListCopy.Get() };
 		mCmdQueueCopy->ExecuteCommandLists(1, CommandListCast(cmdLists));
-		CHK(mCmdQueueCopy->Signal(mFence.Get(), 10));
-		while (mFence->GetCompletedValue() < 10);
+		CHK(mCmdQueueCopy->Signal(fenceCopy.Get(), 1));
+		while (fenceCopy->GetCompletedValue() != 1)
+		{
+			Sleep(1);
+		};
 		CHK(mCmdAllocCopy->Reset());
 	}
 
@@ -682,14 +687,19 @@ float4 main(Input input) : SV_Target {
 
 	void Present()
 	{
-		while ((mFence->GetCompletedValue() + 1) < mFrameCount)
-		{
-			SwitchToThread();
-		}
 		DXGI_PRESENT_PARAMETERS pp = {};
 		CHK(mSwapChain->Present1(0, 0, &pp));
+	}
 
-		return;
+	void Wait()
+	{
+		if (mFrameCount != 0)
+		{
+			while ((mFence->GetCompletedValue() + 1) < mFrameCount)
+			{
+				SwitchToThread();
+			}
+		}
 	}
 
 private:
@@ -798,15 +808,16 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int)
 	MSG msg;
 	ZeroMemory(&msg, sizeof msg);
 
+	HWND mainWindowHandle = 0;
 #ifdef NDEBUG
 	try
 #endif
 	{
-		g_mainWindowHandle = setupWindow(WINDOW_WIDTH, WINDOW_HEIGHT);
-		ShowWindow(g_mainWindowHandle, SW_SHOW);
-		UpdateWindow(g_mainWindowHandle);
+		mainWindowHandle = setupWindow(WINDOW_WIDTH, WINDOW_HEIGHT);
+		ShowWindow(mainWindowHandle, SW_SHOW);
+		UpdateWindow(mainWindowHandle);
 
-		D3D d3d(WINDOW_WIDTH, WINDOW_HEIGHT, g_mainWindowHandle);
+		D3D d3d(WINDOW_WIDTH, WINDOW_HEIGHT, mainWindowHandle);
 
 		while (msg.message != WM_QUIT) {
 			BOOL r = PeekMessage(&msg, nullptr, 0, 0, PM_REMOVE);
@@ -838,6 +849,7 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int)
 						d3d.ChangeTexture(false);
 					}
 				}
+				d3d.Wait();
 				d3d.Draw();
 				d3d.Present();
 			}
@@ -848,7 +860,7 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int)
 	}
 #ifdef NDEBUG
 	catch (std::exception& e) {
-		MessageBoxA(g_mainWindowHandle, e.what(), "Exception occuured.", MB_ICONSTOP);
+		MessageBoxA(mainWindowHandle, e.what(), "Exception occuured.", MB_ICONSTOP);
 	}
 #endif
 
