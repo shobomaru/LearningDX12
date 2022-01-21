@@ -10,6 +10,129 @@
 #include <iterator>
 #include <dxcapi.h>
 
+// new d3dx12.h
+
+class CD3DX12_BARRIER_SUBRESOURCE_RANGE : public D3D12_BARRIER_SUBRESOURCE_RANGE
+{
+public:
+	CD3DX12_BARRIER_SUBRESOURCE_RANGE() = default;
+	CD3DX12_BARRIER_SUBRESOURCE_RANGE(const D3D12_BARRIER_SUBRESOURCE_RANGE& o) noexcept :
+		D3D12_BARRIER_SUBRESOURCE_RANGE(o)
+	{}
+	explicit CD3DX12_BARRIER_SUBRESOURCE_RANGE(UINT Subresource) noexcept :
+		D3D12_BARRIER_SUBRESOURCE_RANGE{ Subresource, 0, 0, 0, 0, 0 }
+	{}
+	CD3DX12_BARRIER_SUBRESOURCE_RANGE(
+		UINT FirstMipLevel,
+		UINT NumMips,
+		UINT FirstArraySlice,
+		UINT NumArraySlices,
+		UINT FirstPlane = 0,
+		UINT NumPlanes = UINT_MAX) noexcept :
+		D3D12_BARRIER_SUBRESOURCE_RANGE
+	{
+		FirstMipLevel,
+		NumMips,
+		FirstArraySlice,
+		NumArraySlices,
+		FirstPlane,
+		NumPlanes
+	}
+	{}
+};
+
+class CD3DX12_GLOBAL_BARRIER : public D3D12_GLOBAL_BARRIER
+{
+public:
+	CD3DX12_GLOBAL_BARRIER() = default;
+	CD3DX12_GLOBAL_BARRIER(const D3D12_GLOBAL_BARRIER& o) noexcept : D3D12_GLOBAL_BARRIER(o) {}
+	CD3DX12_GLOBAL_BARRIER(
+		D3D12_BARRIER_SYNC syncBefore,
+		D3D12_BARRIER_SYNC syncAfter,
+		D3D12_BARRIER_ACCESS accessBefore,
+		D3D12_BARRIER_ACCESS accessAfter) noexcept : D3D12_GLOBAL_BARRIER{
+			syncBefore,
+			syncAfter,
+			accessBefore,
+			accessAfter
+	}
+	{}
+};
+
+class CD3DX12_BUFFER_BARRIER : public D3D12_BUFFER_BARRIER
+{
+public:
+	CD3DX12_BUFFER_BARRIER() = default;
+	CD3DX12_BUFFER_BARRIER(const D3D12_BUFFER_BARRIER& o) noexcept : D3D12_BUFFER_BARRIER(o) {}
+	CD3DX12_BUFFER_BARRIER(
+		D3D12_BARRIER_SYNC syncBefore,
+		D3D12_BARRIER_SYNC syncAfter,
+		D3D12_BARRIER_ACCESS accessBefore,
+		D3D12_BARRIER_ACCESS accessAfter,
+		ID3D12Resource* pRes) noexcept : D3D12_BUFFER_BARRIER{
+			syncBefore,
+			syncAfter,
+			accessBefore,
+			accessAfter,
+			pRes,
+			0, ULLONG_MAX
+	}
+	{}
+};
+
+class CD3DX12_TEXTURE_BARRIER : public D3D12_TEXTURE_BARRIER
+{
+public:
+	CD3DX12_TEXTURE_BARRIER() = default;
+	CD3DX12_TEXTURE_BARRIER(const D3D12_TEXTURE_BARRIER& o) noexcept : D3D12_TEXTURE_BARRIER(o) {}
+	CD3DX12_TEXTURE_BARRIER(
+		D3D12_BARRIER_SYNC syncBefore,
+		D3D12_BARRIER_SYNC syncAfter,
+		D3D12_BARRIER_ACCESS accessBefore,
+		D3D12_BARRIER_ACCESS accessAfter,
+		D3D12_BARRIER_LAYOUT layoutBefore,
+		D3D12_BARRIER_LAYOUT layoutAfter,
+		ID3D12Resource* pRes,
+		const D3D12_BARRIER_SUBRESOURCE_RANGE& subresources,
+		D3D12_TEXTURE_BARRIER_FLAGS flag = D3D12_TEXTURE_BARRIER_FLAG_NONE) noexcept : D3D12_TEXTURE_BARRIER{
+			syncBefore,
+			syncAfter,
+			accessBefore,
+			accessAfter,
+			layoutBefore,
+			layoutAfter,
+			pRes,
+			subresources,
+			flag
+	}
+	{}
+};
+
+class CD3DX12_BARRIER_GROUP : public D3D12_BARRIER_GROUP
+{
+public:
+	CD3DX12_BARRIER_GROUP() = default;
+	CD3DX12_BARRIER_GROUP(const D3D12_BARRIER_GROUP& o) noexcept : D3D12_BARRIER_GROUP(o) {}
+	CD3DX12_BARRIER_GROUP(UINT32 numBarriers, const D3D12_BUFFER_BARRIER* pBarriers) noexcept
+	{
+		Type = D3D12_BARRIER_TYPE_BUFFER;
+		NumBarriers = numBarriers;
+		pBufferBarriers = pBarriers;
+	}
+	CD3DX12_BARRIER_GROUP(UINT32 numBarriers, const D3D12_TEXTURE_BARRIER* pBarriers) noexcept
+	{
+		Type = D3D12_BARRIER_TYPE_TEXTURE;
+		NumBarriers = numBarriers;
+		pTextureBarriers = pBarriers;
+	}
+	CD3DX12_BARRIER_GROUP(UINT32 numBarriers, const D3D12_GLOBAL_BARRIER* pBarriers) noexcept
+	{
+		Type = D3D12_BARRIER_TYPE_GLOBAL;
+		NumBarriers = numBarriers;
+		pGlobalBarriers = pBarriers;
+	}
+};
+
 #pragma comment(lib, "dxgi.lib")
 #pragma comment(lib, "d3d12.lib")
 #pragma comment(lib, "dxcompiler.lib")
@@ -162,12 +285,22 @@ public:
 			debug->EnableDebugLayer();
 			ComPtr<ID3D12Debug3> debug3;
 			CHK(debug.As(&debug3));
-			debug3->SetEnableGPUBasedValidation(TRUE);
+			// GBV does not support enhanced barriers?
+			//debug3->SetEnableGPUBasedValidation(TRUE);
 			debug3->SetEnableSynchronizedCommandQueueValidation(TRUE);
+			ComPtr<ID3D12Debug6> debug6;
+			CHK(debug.As(&debug6));
+			debug6->SetEnableAutoName(TRUE);
+			debug6->SetForceLegacyBarrierValidation(FALSE);
 			debug.Reset();
 		}
 #endif
 		CHK(D3D12CreateDevice(adapter.Get(), D3D_FEATURE_LEVEL_12_1, IID_PPV_ARGS(&mDevice)));
+		D3D12_FEATURE_DATA_D3D12_OPTIONS12 options12 = {};
+		CHK(mDevice->CheckFeatureSupport(D3D12_FEATURE_D3D12_OPTIONS12, &options12, sizeof options12));
+		if (!options12.EnhancedBarriersSupported)
+			throw runtime_error("Enhanced barriers not supported.");
+
 		mDSVStride = mDevice->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_DSV);
 		mRTVStride = mDevice->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_RTV);
 		mResourceStride = mDevice->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
@@ -377,7 +510,7 @@ float4 main(Input input) : SV_Target {
 		resDesc1.Flags = D3D12_RESOURCE_FLAG_ALLOW_RENDER_TARGET;
 		auto clearValue = CD3DX12_CLEAR_VALUE(DXGI_FORMAT_R8G8B8A8_UNORM, kDefaultRTClearColor);
 		CHK(device10->CreateCommittedResource3(
-			&heapProp, D3D12_HEAP_FLAG_NONE, &resDesc1, D3D12_BARRIER_LAYOUT_UNDEFINED, nullptr,
+			&heapProp, D3D12_HEAP_FLAG_NONE, &resDesc1, D3D12_BARRIER_LAYOUT_UNDEFINED, &clearValue,
 			nullptr, 0, nullptr, IID_PPV_ARGS(&mSceneTex)));
 
 		resDesc1.Dimension = D3D12_RESOURCE_DIMENSION_TEXTURE2D;
@@ -391,7 +524,7 @@ float4 main(Input input) : SV_Target {
 		resDesc1.Flags = D3D12_RESOURCE_FLAG_ALLOW_DEPTH_STENCIL | D3D12_RESOURCE_FLAG_DENY_SHADER_RESOURCE;
 		clearValue = CD3DX12_CLEAR_VALUE(DXGI_FORMAT_D32_FLOAT, kDefaultDSClearColor);
 		CHK(device10->CreateCommittedResource3(
-			&heapProp, D3D12_HEAP_FLAG_NONE, &resDesc1, D3D12_BARRIER_LAYOUT_UNDEFINED, nullptr,
+			&heapProp, D3D12_HEAP_FLAG_NONE, &resDesc1, D3D12_BARRIER_LAYOUT_UNDEFINED, &clearValue,
 			nullptr, 0, nullptr, IID_PPV_ARGS(&mSceneZ)));
 
 		heapProp = CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_UPLOAD);
@@ -425,11 +558,8 @@ float4 main(Input input) : SV_Target {
 			resDesc1.SampleDesc.Count = 1;
 			resDesc1.Layout = D3D12_TEXTURE_LAYOUT_UNKNOWN;
 			resDesc1.Flags = D3D12_RESOURCE_FLAG_NONE;
-			//CHK(mDevice->CreateCommittedResource(
-			//	&heapProp, D3D12_HEAP_FLAG_NONE, &resDesc,
-			//	D3D12_RESOURCE_STATE_COPY_DEST, nullptr, IID_PPV_ARGS(&mBindlessResource[i])));
 			CHK(device10->CreateCommittedResource3(
-				&heapProp, D3D12_HEAP_FLAG_NONE, &resDesc1, D3D12_BARRIER_LAYOUT_COPY_DEST, nullptr,
+				&heapProp, D3D12_HEAP_FLAG_NONE, &resDesc1, D3D12_BARRIER_LAYOUT_COMMON, nullptr,
 				nullptr, 0, nullptr, IID_PPV_ARGS(&mBindlessResource[i])));
 
 			static const float colors[MAX_DEFINED_RESOURCE][4] = {
@@ -448,13 +578,18 @@ float4 main(Input input) : SV_Target {
 				D3D12_TEXTURE_DATA_PLACEMENT_ALIGNMENT * i,
 				0, 1, &sub);
 		}
-		D3D12_RESOURCE_BARRIER transitions[MAX_DEFINED_RESOURCE];
+		CD3DX12_TEXTURE_BARRIER barrierTex[MAX_DEFINED_RESOURCE];
 		for (int i = 0; i < MAX_DEFINED_RESOURCE; ++i)
 		{
-			transitions[i] = CD3DX12_RESOURCE_BARRIER::Transition(
-				mBindlessResource[i].Get(), D3D12_RESOURCE_STATE_COPY_DEST, D3D12_RESOURCE_STATE_COMMON, D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES);
+			barrierTex[i] = CD3DX12_TEXTURE_BARRIER(
+				D3D12_BARRIER_SYNC_ALL, D3D12_BARRIER_SYNC_ALL,
+				D3D12_BARRIER_ACCESS_COMMON, D3D12_BARRIER_ACCESS_COPY_DEST,
+				D3D12_BARRIER_LAYOUT_COMMON, D3D12_BARRIER_LAYOUT_COMMON,
+				mBindlessResource[i].Get(), CD3DX12_BARRIER_SUBRESOURCE_RANGE(0),
+				D3D12_TEXTURE_BARRIER_FLAG_NONE);
 		}
-		mCmdListCopy->ResourceBarrier(MAX_DEFINED_RESOURCE, transitions);
+		CD3DX12_BARRIER_GROUP barriers(_countof(barrierTex), barrierTex);
+		cmdListCopy7->Barrier(1, &barriers);
 
 		descHeapDesc = {};
 		descHeapDesc.Type = D3D12_DESCRIPTOR_HEAP_TYPE_RTV;
@@ -566,9 +701,6 @@ float4 main(Input input) : SV_Target {
 		resDesc1.SampleDesc.Count = 1;
 		resDesc1.Layout = D3D12_TEXTURE_LAYOUT_ROW_MAJOR;
 		resDesc1.Flags = D3D12_RESOURCE_FLAG_DENY_SHADER_RESOURCE;
-		//CHK(mDevice->CreateCommittedResource(
-		//	&heapProp, D3D12_HEAP_FLAG_NONE, &resDesc,
-		//	D3D12_RESOURCE_STATE_GENERIC_READ, nullptr, IID_PPV_ARGS(&mVB)));
 		CHK(device10->CreateCommittedResource3(
 			&heapProp, D3D12_HEAP_FLAG_NONE, &resDesc1, D3D12_BARRIER_LAYOUT_UNDEFINED, nullptr,
 			nullptr, 0, nullptr, IID_PPV_ARGS(&mVB)));
@@ -721,29 +853,42 @@ float4 main(Input input) : SV_Target {
 		mCmdList->SetDescriptorHeaps(_countof(descHeap), descHeap);
 
 		// Draw scene
+		{
+			CD3DX12_BUFFER_BARRIER barrierBuf[] = {
+				CD3DX12_BUFFER_BARRIER(
+					D3D12_BARRIER_SYNC_NONE, D3D12_BARRIER_SYNC_ALL_SHADING,
+					D3D12_BARRIER_ACCESS_NO_ACCESS, D3D12_BARRIER_ACCESS_VERTEX_BUFFER, mVB.Get()),
+				CD3DX12_BUFFER_BARRIER(
+					D3D12_BARRIER_SYNC_NONE, D3D12_BARRIER_SYNC_INPUT_ASSEMBLER,
+					D3D12_BARRIER_ACCESS_NO_ACCESS, D3D12_BARRIER_ACCESS_INDEX_BUFFER, mIB.Get()),
+				CD3DX12_BUFFER_BARRIER(
+					D3D12_BARRIER_SYNC_NONE, D3D12_BARRIER_SYNC_ALL_SHADING,
+					D3D12_BARRIER_ACCESS_NO_ACCESS, D3D12_BARRIER_ACCESS_VERTEX_BUFFER, mVBPlane.Get()),
+				CD3DX12_BUFFER_BARRIER(
+					D3D12_BARRIER_SYNC_NONE, D3D12_BARRIER_SYNC_INPUT_ASSEMBLER,
+					D3D12_BARRIER_ACCESS_NO_ACCESS, D3D12_BARRIER_ACCESS_INDEX_BUFFER, mIBPlane.Get()),
+			};
+			CD3DX12_TEXTURE_BARRIER barrierTex[] = {
+				CD3DX12_TEXTURE_BARRIER(
+					D3D12_BARRIER_SYNC_NONE, D3D12_BARRIER_SYNC_RENDER_TARGET,
+					D3D12_BARRIER_ACCESS_NO_ACCESS, D3D12_BARRIER_ACCESS_RENDER_TARGET,
+					D3D12_BARRIER_LAYOUT_UNDEFINED, D3D12_BARRIER_LAYOUT_RENDER_TARGET,
+					mSceneTex.Get(), CD3DX12_BARRIER_SUBRESOURCE_RANGE(0),
+					D3D12_TEXTURE_BARRIER_FLAG_DISCARD),
+				CD3DX12_TEXTURE_BARRIER(
+					D3D12_BARRIER_SYNC_NONE, D3D12_BARRIER_SYNC_DEPTH_STENCIL,
+					D3D12_BARRIER_ACCESS_NO_ACCESS, D3D12_BARRIER_ACCESS_DEPTH_STENCIL_WRITE,
+					D3D12_BARRIER_LAYOUT_UNDEFINED, D3D12_BARRIER_LAYOUT_DEPTH_STENCIL_WRITE,
+					mSceneZ.Get(), CD3DX12_BARRIER_SUBRESOURCE_RANGE(0),
+					D3D12_TEXTURE_BARRIER_FLAG_DISCARD)
+			};
+			CD3DX12_BARRIER_GROUP barriers[] = {
+				CD3DX12_BARRIER_GROUP(_countof(barrierBuf), barrierBuf),
+				CD3DX12_BARRIER_GROUP(_countof(barrierTex), barrierTex)
+			};
+			cmdList7->Barrier(_countof(barriers), barriers);
+		}
 
-		CD3DX12_RESOURCE_BARRIER transitions[10];
-		transitions[0] = CD3DX12_RESOURCE_BARRIER::Transition(mSceneTex.Get(),
-			D3D12_RESOURCE_STATE_GENERIC_READ, D3D12_RESOURCE_STATE_RENDER_TARGET);
-		mCmdList->ResourceBarrier(1, transitions);
-
-		D3D12_BARRIER_GROUP barrierGroups[3] = {};
-		barrierGroups[0].Type = D3D12_BARRIER_TYPE_TEXTURE;
-		barrierGroups[0].NumBarriers = 1;
-		D3D12_TEXTURE_BARRIER texBarriers[10] = {};
-		texBarriers[0].SyncBefore = D3D12_BARRIER_SYNC_ALL;
-		texBarriers[0].SyncAfter = D3D12_BARRIER_SYNC_ALL;
-		texBarriers[0].AccessBefore = D3D12_BARRIER_ACCESS_COMMON;
-		texBarriers[0].AccessAfter = D3D12_BARRIER_ACCESS_RENDER_TARGET;
-		texBarriers[0].LayoutBefore = D3D12_BARRIER_LAYOUT_PRESENT;
-		texBarriers[0].LayoutAfter = D3D12_BARRIER_LAYOUT_RENDER_TARGET;
-		texBarriers[0].pResource = mSceneTex.Get();
-		texBarriers[0].Subresources.NumArraySlices = 1;
-		texBarriers[0].Subresources.NumMipLevels = 1;
-		texBarriers[0].Subresources.NumPlanes = 1;
-		texBarriers[0].Flags = D3D12_TEXTURE_BARRIER_FLAG_DISCARD;
-		barrierGroups[0].pTextureBarriers = texBarriers;
-		cmdList7->Barrier(1, barrierGroups);
 
 		mCmdList->ClearRenderTargetView(rtvScene, kDefaultRTClearColor, 0, nullptr);
 		mCmdList->ClearDepthStencilView(dsvScene, D3D12_CLEAR_FLAG_DEPTH, kDefaultDSClearColor[0], 0, 0, nullptr);
@@ -770,17 +915,80 @@ float4 main(Input input) : SV_Target {
 
 		// Copy scene image to swap chain
 
-		transitions[0] = CD3DX12_RESOURCE_BARRIER::Transition(mSceneTex.Get(),
-			D3D12_RESOURCE_STATE_RENDER_TARGET, D3D12_RESOURCE_STATE_GENERIC_READ);
-		transitions[1] = CD3DX12_RESOURCE_BARRIER::Transition(mSwapChainTex[frameIndex].Get(),
-			D3D12_RESOURCE_STATE_PRESENT, D3D12_RESOURCE_STATE_COPY_DEST);
-		mCmdList->ResourceBarrier(2, transitions);
+		// Idk why enhanced barriers for swap chains causus fatal error :(
+		D3D12_RESOURCE_BARRIER transitions[1] = {
+			CD3DX12_RESOURCE_BARRIER::Transition(mSwapChainTex[frameIndex].Get(),
+			D3D12_RESOURCE_STATE_PRESENT, D3D12_RESOURCE_STATE_COPY_DEST)
+		};
+		mCmdList->ResourceBarrier(1, transitions);
+		{
+			CD3DX12_BUFFER_BARRIER barrierBuf[] = {
+				// This buffer barriers are optional
+				CD3DX12_BUFFER_BARRIER(
+					D3D12_BARRIER_SYNC_ALL_SHADING, D3D12_BARRIER_SYNC_NONE,
+					D3D12_BARRIER_ACCESS_VERTEX_BUFFER, D3D12_BARRIER_ACCESS_NO_ACCESS, mVB.Get()),
+				CD3DX12_BUFFER_BARRIER(
+					D3D12_BARRIER_SYNC_INPUT_ASSEMBLER, D3D12_BARRIER_SYNC_NONE,
+					D3D12_BARRIER_ACCESS_INDEX_BUFFER, D3D12_BARRIER_ACCESS_NO_ACCESS, mIB.Get()),
+				CD3DX12_BUFFER_BARRIER(
+					D3D12_BARRIER_SYNC_ALL_SHADING, D3D12_BARRIER_SYNC_NONE,
+					D3D12_BARRIER_ACCESS_VERTEX_BUFFER, D3D12_BARRIER_ACCESS_NO_ACCESS, mVBPlane.Get()),
+				CD3DX12_BUFFER_BARRIER(
+					D3D12_BARRIER_SYNC_INPUT_ASSEMBLER, D3D12_BARRIER_SYNC_NONE,
+					D3D12_BARRIER_ACCESS_INDEX_BUFFER, D3D12_BARRIER_ACCESS_NO_ACCESS, mIBPlane.Get())
+			};
+			CD3DX12_TEXTURE_BARRIER barrierTex[] = {
+				CD3DX12_TEXTURE_BARRIER(
+					D3D12_BARRIER_SYNC_RENDER_TARGET, D3D12_BARRIER_SYNC_COPY,
+					D3D12_BARRIER_ACCESS_RENDER_TARGET, D3D12_BARRIER_ACCESS_COPY_SOURCE,
+					D3D12_BARRIER_LAYOUT_RENDER_TARGET, D3D12_BARRIER_LAYOUT_DIRECT_QUEUE_COPY_SOURCE,
+					mSceneTex.Get(), CD3DX12_BARRIER_SUBRESOURCE_RANGE(0),
+					D3D12_TEXTURE_BARRIER_FLAG_NONE),
+				CD3DX12_TEXTURE_BARRIER(
+					D3D12_BARRIER_SYNC_DEPTH_STENCIL, D3D12_BARRIER_SYNC_NONE,
+					D3D12_BARRIER_ACCESS_DEPTH_STENCIL_WRITE, D3D12_BARRIER_ACCESS_NO_ACCESS,
+					D3D12_BARRIER_LAYOUT_DEPTH_STENCIL_WRITE, D3D12_BARRIER_LAYOUT_UNDEFINED,
+					mSceneZ.Get(), CD3DX12_BARRIER_SUBRESOURCE_RANGE(0),
+					D3D12_TEXTURE_BARRIER_FLAG_NONE),
+				//CD3DX12_TEXTURE_BARRIER(
+				//	D3D12_BARRIER_SYNC_NONE, D3D12_BARRIER_SYNC_COPY,
+				//	D3D12_BARRIER_ACCESS_NO_ACCESS, D3D12_BARRIER_ACCESS_COPY_DEST,
+				//	D3D12_BARRIER_LAYOUT_COMMON, D3D12_BARRIER_LAYOUT_DIRECT_QUEUE_COPY_DEST,
+				//	mSwapChainTex[frameIndex].Get(), CD3DX12_BARRIER_SUBRESOURCE_RANGE(0),
+				//	D3D12_TEXTURE_BARRIER_FLAG_NONE)
+			};
+			CD3DX12_BARRIER_GROUP barriers[] = {
+				CD3DX12_BARRIER_GROUP(_countof(barrierBuf), barrierBuf),
+				CD3DX12_BARRIER_GROUP(_countof(barrierTex), barrierTex)
+			};
+			cmdList7->Barrier(_countof(barriers), barriers);
+		}
 
 		mCmdList->CopyResource(mSwapChainTex[frameIndex].Get(), mSceneTex.Get());
 
 		transitions[0] = CD3DX12_RESOURCE_BARRIER::Transition(mSwapChainTex[frameIndex].Get(),
 			D3D12_RESOURCE_STATE_COPY_DEST, D3D12_RESOURCE_STATE_PRESENT);
 		mCmdList->ResourceBarrier(1, transitions);
+		{
+			CD3DX12_TEXTURE_BARRIER barrierTex[] = {
+				CD3DX12_TEXTURE_BARRIER(
+					D3D12_BARRIER_SYNC_COPY, D3D12_BARRIER_SYNC_NONE,
+					D3D12_BARRIER_ACCESS_COPY_SOURCE, D3D12_BARRIER_ACCESS_NO_ACCESS,
+					D3D12_BARRIER_LAYOUT_DIRECT_QUEUE_COPY_SOURCE, D3D12_BARRIER_LAYOUT_UNDEFINED,
+					mSceneTex.Get(), CD3DX12_BARRIER_SUBRESOURCE_RANGE(0),
+					D3D12_TEXTURE_BARRIER_FLAG_NONE),
+				//CD3DX12_TEXTURE_BARRIER(
+				//	D3D12_BARRIER_SYNC_COPY, D3D12_BARRIER_SYNC_ALL,
+				//	D3D12_BARRIER_ACCESS_COPY_DEST, D3D12_BARRIER_ACCESS_COMMON,
+				//	D3D12_BARRIER_LAYOUT_DIRECT_QUEUE_COPY_DEST, D3D12_BARRIER_LAYOUT_COMMON,
+				//	mSwapChainTex[frameIndex].Get(), CD3DX12_BARRIER_SUBRESOURCE_RANGE(0),
+				//	D3D12_TEXTURE_BARRIER_FLAG_NONE),
+			};
+			CD3DX12_BARRIER_GROUP barriers[] = {
+				CD3DX12_BARRIER_GROUP(_countof(barrierTex), barrierTex)
+			};
+			cmdList7->Barrier(_countof(barriers), barriers);
+		}
 
 		// Finish recording commands
 		CHK(mCmdList->Close());
