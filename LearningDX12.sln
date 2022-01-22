@@ -23,6 +23,10 @@ Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "HLSL2021", "HLSL2021\HLSL20
 EndProject
 Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "EnhancedBarriers", "EnhancedBarriers\EnhancedBarriers.vcxproj", "{B47FD08E-ED1F-4810-994F-912079535D2C}"
 EndProject
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "EnhancedBarriersAsyncCompute", "EnhancedBarriersAsyncCompute\EnhancedBarriersAsyncCompute.vcxproj", "{DC22A10E-AA55-4FDD-B1D2-81DA5BD5551E}"
+EndProject
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "EnhancedBarriersTiledRenderTarget", "EnhancedBarriersTiledRenderTarget\EnhancedBarriersTiledRenderTarget.vcxproj", "{A54750F3-9C70-4B18-BB44-37B200EBABBD}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|x64 = Debug|x64
@@ -91,6 +95,18 @@ Global
 		{B47FD08E-ED1F-4810-994F-912079535D2C}.Release|x64.ActiveCfg = Release|x64
 		{B47FD08E-ED1F-4810-994F-912079535D2C}.Release|x64.Build.0 = Release|x64
 		{B47FD08E-ED1F-4810-994F-912079535D2C}.Release|x86.ActiveCfg = Release|x64
+		{DC22A10E-AA55-4FDD-B1D2-81DA5BD5551E}.Debug|x64.ActiveCfg = Debug|x64
+		{DC22A10E-AA55-4FDD-B1D2-81DA5BD5551E}.Debug|x64.Build.0 = Debug|x64
+		{DC22A10E-AA55-4FDD-B1D2-81DA5BD5551E}.Debug|x86.ActiveCfg = Debug|x64
+		{DC22A10E-AA55-4FDD-B1D2-81DA5BD5551E}.Release|x64.ActiveCfg = Release|x64
+		{DC22A10E-AA55-4FDD-B1D2-81DA5BD5551E}.Release|x64.Build.0 = Release|x64
+		{DC22A10E-AA55-4FDD-B1D2-81DA5BD5551E}.Release|x86.ActiveCfg = Release|x64
+		{A54750F3-9C70-4B18-BB44-37B200EBABBD}.Debug|x64.ActiveCfg = Debug|x64
+		{A54750F3-9C70-4B18-BB44-37B200EBABBD}.Debug|x64.Build.0 = Debug|x64
+		{A54750F3-9C70-4B18-BB44-37B200EBABBD}.Debug|x86.ActiveCfg = Debug|x64
+		{A54750F3-9C70-4B18-BB44-37B200EBABBD}.Release|x64.ActiveCfg = Release|x64
+		{A54750F3-9C70-4B18-BB44-37B200EBABBD}.Release|x64.Build.0 = Release|x64
+		{A54750F3-9C70-4B18-BB44-37B200EBABBD}.Release|x86.ActiveCfg = Release|x64
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
