@@ -492,8 +492,9 @@ void main(uint2 id : SV_DispatchThreadID) {
 		mFrameCount++;
 		auto frameIndex = mSwapChain->GetCurrentBackBufferIndex();
 
-		ComPtr<ID3D12GraphicsCommandList7> cmdList7;
+		ComPtr<ID3D12GraphicsCommandList7> cmdList7, asyncCmdList7;
 		CHK(mCmdList.As(&cmdList7));
+		CHK(mAsyncCmdList.As(&asyncCmdList7));
 
 		//-------------------------------
 
@@ -507,17 +508,19 @@ void main(uint2 id : SV_DispatchThreadID) {
 		// Draw an image to offscreen
 		{
 			CD3DX12_TEXTURE_BARRIER barrierTex[1] = {
+				// I want to change the resource layout D3D12_BARRIER_LAYOUT_COMPUTE_QUEUE_UNORDERED_ACCESS
+				// but is disallowed because direct queue cannot use that layout.
 				CD3DX12_TEXTURE_BARRIER(
 					D3D12_BARRIER_SYNC_NONE, D3D12_BARRIER_SYNC_COMPUTE_SHADING,
-					D3D12_BARRIER_ACCESS_NO_ACCESS, D3D12_BARRIER_ACCESS_SHADER_RESOURCE,
-					D3D12_BARRIER_LAYOUT_UNDEFINED, D3D12_BARRIER_LAYOUT_COMPUTE_QUEUE_UNORDERED_ACCESS,
+					D3D12_BARRIER_ACCESS_NO_ACCESS, D3D12_BARRIER_ACCESS_UNORDERED_ACCESS,
+					D3D12_BARRIER_LAYOUT_UNDEFINED, D3D12_BARRIER_LAYOUT_UNORDERED_ACCESS,
 					mOffscreenTex.Get(), CD3DX12_BARRIER_SUBRESOURCE_RANGE(0),
 					D3D12_TEXTURE_BARRIER_FLAG_NONE)
 			};
 			CD3DX12_BARRIER_GROUP barriers[] = {
 				CD3DX12_BARRIER_GROUP(_countof(barrierTex), barrierTex)
 			};
-			cmdList7->Barrier(_countof(barriers), barriers);
+			asyncCmdList7->Barrier(_countof(barriers), barriers);
 		}
 
 		mAsyncCmdList->SetComputeRootSignature(mRootSig.Get());
@@ -530,9 +533,9 @@ void main(uint2 id : SV_DispatchThreadID) {
 		{
 			CD3DX12_TEXTURE_BARRIER barrierTex[1] = {
 				CD3DX12_TEXTURE_BARRIER(
-					D3D12_BARRIER_SYNC_NONE, D3D12_BARRIER_SYNC_COMPUTE_SHADING,
-					D3D12_BARRIER_ACCESS_NO_ACCESS, D3D12_BARRIER_ACCESS_SHADER_RESOURCE,
-					D3D12_BARRIER_LAYOUT_COMPUTE_QUEUE_UNORDERED_ACCESS, D3D12_BARRIER_LAYOUT_DIRECT_QUEUE_COPY_SOURCE,
+					D3D12_BARRIER_SYNC_NONE, D3D12_BARRIER_SYNC_COPY,
+					D3D12_BARRIER_ACCESS_NO_ACCESS, D3D12_BARRIER_ACCESS_COPY_SOURCE,
+					D3D12_BARRIER_LAYOUT_UNORDERED_ACCESS, D3D12_BARRIER_LAYOUT_DIRECT_QUEUE_COPY_SOURCE,
 					mOffscreenTex.Get(), CD3DX12_BARRIER_SUBRESOURCE_RANGE(0),
 					D3D12_TEXTURE_BARRIER_FLAG_NONE)
 			};
@@ -548,6 +551,20 @@ void main(uint2 id : SV_DispatchThreadID) {
 
 		mCmdList->CopyResource(mSwapChainTex[frameIndex].Get(), mOffscreenTex.Get());
 
+		{
+			CD3DX12_TEXTURE_BARRIER barrierTex[1] = {
+				CD3DX12_TEXTURE_BARRIER(
+					D3D12_BARRIER_SYNC_COPY, D3D12_BARRIER_SYNC_NONE,
+					D3D12_BARRIER_ACCESS_COPY_SOURCE, D3D12_BARRIER_ACCESS_NO_ACCESS,
+					D3D12_BARRIER_LAYOUT_DIRECT_QUEUE_COPY_SOURCE, D3D12_BARRIER_LAYOUT_UNDEFINED,
+					mOffscreenTex.Get(), CD3DX12_BARRIER_SUBRESOURCE_RANGE(0),
+					D3D12_TEXTURE_BARRIER_FLAG_DISCARD)
+			};
+			CD3DX12_BARRIER_GROUP barriers[] = {
+				CD3DX12_BARRIER_GROUP(_countof(barrierTex), barrierTex)
+			};
+			cmdList7->Barrier(_countof(barriers), barriers);
+		}
 		transitions[0] = CD3DX12_RESOURCE_BARRIER::Transition(mSwapChainTex[frameIndex].Get(),
 			D3D12_RESOURCE_STATE_COPY_DEST, D3D12_RESOURCE_STATE_PRESENT);
 		mCmdList->ResourceBarrier(1, transitions);
