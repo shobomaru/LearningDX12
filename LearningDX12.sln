@@ -27,6 +27,8 @@ Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "EnhancedBarriersAsyncComput
 EndProject
 Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "DXRInline", "DXRInline\DXRInline.vcxproj", "{B35E6155-5049-4E1C-88B5-38361A1F501C}"
 EndProject
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "DXR", "DXR\DXR.vcxproj", "{38B477A7-F198-41B6-93B0-A6293EDC2F9D}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|x64 = Debug|x64
@@ -107,6 +109,12 @@ Global
 		{B35E6155-5049-4E1C-88B5-38361A1F501C}.Release|x64.ActiveCfg = Release|x64
 		{B35E6155-5049-4E1C-88B5-38361A1F501C}.Release|x64.Build.0 = Release|x64
 		{B35E6155-5049-4E1C-88B5-38361A1F501C}.Release|x86.ActiveCfg = Release|x64
+		{38B477A7-F198-41B6-93B0-A6293EDC2F9D}.Debug|x64.ActiveCfg = Debug|x64
+		{38B477A7-F198-41B6-93B0-A6293EDC2F9D}.Debug|x64.Build.0 = Debug|x64
+		{38B477A7-F198-41B6-93B0-A6293EDC2F9D}.Debug|x86.ActiveCfg = Debug|x64
+		{38B477A7-F198-41B6-93B0-A6293EDC2F9D}.Release|x64.ActiveCfg = Release|x64
+		{38B477A7-F198-41B6-93B0-A6293EDC2F9D}.Release|x64.Build.0 = Release|x64
+		{38B477A7-F198-41B6-93B0-A6293EDC2F9D}.Release|x86.ActiveCfg = Release|x64
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE

@@ -61,21 +61,11 @@ class D3D
 	};
 	ComPtr<ID3D12Resource> mConstantBuffer[BUFFER_COUNT];
 
-	enum class RTVs {
-		Scene,
-		Max,
-	};
-	ComPtr<ID3D12DescriptorHeap> mRTV;
-
-	enum class DSVs {
-		Scene,
-		Max,
-	};
-	ComPtr<ID3D12DescriptorHeap> mDSV;
-
 	enum class ShaderViews {
 		// Base pass
 		SceneCBVMatrix,
+		SceneTexture,
+		AccelerationStructure,
 		SceneBindlessResource,
 		Max = SceneBindlessResource + MAX_BINDLESS_RESOURCE,
 	};
@@ -87,10 +77,7 @@ class D3D
 	};
 	ComPtr<ID3D12DescriptorHeap> mSampler;
 
-	ComPtr<ID3D12RootSignature> mSceneRootSig;
-	ComPtr<ID3D12PipelineState> mScenePSO;
 	ComPtr<ID3D12Resource> mSceneTex;
-	ComPtr<ID3D12Resource> mSceneZ;
 
 	ComPtr<ID3D12Resource> mBindlessResource[MAX_BINDLESS_RESOURCE];
 
@@ -109,13 +96,17 @@ class D3D
 
 	ComPtr<ID3D12Resource> mVBPlane;
 	ComPtr<ID3D12Resource> mIBPlane;
-	D3D12_VERTEX_BUFFER_VIEW mVBPlaneView = {};
-	D3D12_INDEX_BUFFER_VIEW mIBPlaneView = {};
 
 	ComPtr<ID3D12Resource> mBlas;
 	ComPtr<ID3D12Resource> mBlasPlane;
 	ComPtr<ID3D12Resource> mTlasInstance;
 	ComPtr<ID3D12Resource> mTlas;
+
+	ComPtr<ID3D12StateObject> mStateObject;
+	ComPtr<ID3D12StateObjectProperties> mStateObjectProps;
+	ComPtr<ID3D12RootSignature> mSceneRootSigGlobal;
+	ComPtr<ID3D12RootSignature> mSceneRootSigLocal;
+	ComPtr<ID3D12Resource> mShaderBindingTable;
 
 	const float kDefaultDSClearColor[4] = { 1.0f, 0.0f, 0.0f, 0.0f };
 	const float kDefaultRTClearColor[4] = { 0.1f, 0.2f, 0.4f, 0.0f };
@@ -124,6 +115,12 @@ class D3D
 	{
 		return ((val + align - 1) & ~(align - 1));
 	}
+
+	const uint32_t oRayGen = 0;
+	const uint32_t oRayGenRootConstant = oRayGen + D3D12_SHADER_IDENTIFIER_SIZE_IN_BYTES;
+	const uint32_t oHitGroup = Align(oRayGenRootConstant + 4, D3D12_RAYTRACING_SHADER_TABLE_BYTE_ALIGNMENT);
+	const uint32_t oMiss = Align(oHitGroup + D3D12_SHADER_IDENTIFIER_SIZE_IN_BYTES, D3D12_RAYTRACING_SHADER_TABLE_BYTE_ALIGNMENT);
+	const uint32_t oMax = Align(oMiss + D3D12_SHADER_IDENTIFIER_SIZE_IN_BYTES, D3D12_RAYTRACING_SHADER_TABLE_BYTE_ALIGNMENT);
 
 public:
 	~D3D()
@@ -206,87 +203,80 @@ public:
 			swapChainRTVHandle.Offset(1, mRTVStride);
 		}
 
-		// Shader
+		// Root Signature
 
 		CD3DX12_DESCRIPTOR_RANGE descRange[10];
-		descRange[0].Init(D3D12_DESCRIPTOR_RANGE_TYPE_CBV, 1, 0);
 		CD3DX12_ROOT_PARAMETER rootParam[10];
-		rootParam[0].InitAsDescriptorTable(1, descRange); // CBV_SRV_UAV
 		CD3DX12_ROOT_SIGNATURE_DESC rootSigDesc;
-		rootSigDesc.Init(1, rootParam, 0, nullptr, D3D12_ROOT_SIGNATURE_FLAG_ALLOW_INPUT_ASSEMBLER_INPUT_LAYOUT);
 
 		ComPtr<ID3DBlob> rootSigBlob, rootSigError;
 
-		descRange[0].Init(D3D12_DESCRIPTOR_RANGE_TYPE_CBV, 1, 0); // VS
-		//descRange[1].Init(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 1, 0, 0); // PS
-		descRange[1].Init(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, MAX_BINDLESS_RESOURCE, 0, 1); // PS
+		// SceneView
+		descRange[0].Init(D3D12_DESCRIPTOR_RANGE_TYPE_CBV, 1, 0);
+		descRange[1].Init(D3D12_DESCRIPTOR_RANGE_TYPE_UAV, 1, 0);
 		descRange[2].Init(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 1, 0);
-		rootParam[0].InitAsDescriptorTable(2, descRange + 0, D3D12_SHADER_VISIBILITY_VERTEX); // CBV_SRV_UAV
-		//rootParam[1].InitAsDescriptorTable(1, descRange + 1, D3D12_SHADER_VISIBILITY_PIXEL); // CBV_SRV_UAV
-		rootParam[1].InitAsDescriptorTable(1, descRange + 2, D3D12_SHADER_VISIBILITY_PIXEL); // CBV_SRV_UAV
-		rootParam[2].InitAsConstants(1, 0, 0, D3D12_SHADER_VISIBILITY_PIXEL);
-		rootSigDesc.Init(3, rootParam, 0, nullptr, D3D12_ROOT_SIGNATURE_FLAG_ALLOW_INPUT_ASSEMBLER_INPUT_LAYOUT);
+		descRange[3].Init(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, MAX_BINDLESS_RESOURCE, 0, 1);
+		rootParam[0].InitAsDescriptorTable(4, descRange + 0);
+		rootSigDesc.Init(1, rootParam, 0, nullptr);
 
 		CHK(D3D12SerializeRootSignature(&rootSigDesc, D3D_ROOT_SIGNATURE_VERSION_1, &rootSigBlob, &rootSigError));
-		CHK(mDevice->CreateRootSignature(0, rootSigBlob->GetBufferPointer(), rootSigBlob->GetBufferSize(), IID_PPV_ARGS(&mSceneRootSig)));
+		CHK(mDevice->CreateRootSignature(0, rootSigBlob->GetBufferPointer(), rootSigBlob->GetBufferSize(), IID_PPV_ARGS(&mSceneRootSigGlobal)));
 
-		static const char shaderCodeSceneVS[] = R"#(
+		rootParam[0].InitAsConstants(0, 1); // b0, space1
+		rootSigDesc.Init(1, rootParam, 0, nullptr, D3D12_ROOT_SIGNATURE_FLAG_LOCAL_ROOT_SIGNATURE);
+
+		CHK(D3D12SerializeRootSignature(&rootSigDesc, D3D_ROOT_SIGNATURE_VERSION_1, &rootSigBlob, &rootSigError));
+		CHK(mDevice->CreateRootSignature(0, rootSigBlob->GetBufferPointer(), rootSigBlob->GetBufferSize(), IID_PPV_ARGS(&mSceneRootSigLocal)));
+
+		// Shader
+
+		static const char shaderCodeSceneRayGen[] = R"#(
+#define SHADER_INC_PER_BOTTOM_INSTANCE 0
+struct Payload { float4 color; };
+
 cbuffer CScene {
 	float4x4 ViewProj;
 };
-struct Output {
-	float4 position : SV_Position;
-	float3 world : WorldPosition;
-	float3 normal : Normal;
-};
-Output main(float3 position : Position, float3 normal : Normal) {
-	Output output;
-	output.position = mul(float4(position, 1), ViewProj);
-	output.world = position;
-	output.normal = normalize(normal);
-	return output;
+RaytracingAccelerationStructure myAS : register(t0);
+RWTexture2D<float4> myTarget : register(u0);
+[shader("raygeneration")]
+void main()
+{
+	float2 uv = (float2)DispatchRaysIndex() / (float2)DispatchRaysDimensions();
+	uv = uv * 2 - 1;
+	RayDesc ray;
+	ray.Origin = float3(0 + uv.x, 0 + uv.y, -10);
+	ray.Direction = normalize(float3(0, 0, 1));
+	ray.TMin = 0.01;
+	ray.TMax = 100.0;
+	Payload payload = { (float4)0 };
+	TraceRay(myAS,
+		RAY_FLAG_CULL_NON_OPAQUE | RAY_FLAG_ACCEPT_FIRST_HIT_AND_END_SEARCH,
+		0x1, 0, SHADER_INC_PER_BOTTOM_INSTANCE, 0, ray, payload);
+	myTarget[DispatchRaysIndex().xy] = payload.color;
 }
 )#";
 
-		static const char shaderCodeScenePS[] = R"#(
-cbuffer CRootParam : register(b0) {
-	uint RootParamOffset;
-};
-Texture2D<float4> ColorMap[] : register(t0, space1);
-RaytracingAccelerationStructure myAS : register(t0);
-struct Input {
-	float4 position : SV_Position;
-	float3 world : WorldPosition;
-	float3 normal : Normal;
-};
-float4 main(Input input) : SV_Target {
-	RayQuery<RAY_FLAG_CULL_NON_OPAQUE 
-			| RAY_FLAG_SKIP_PROCEDURAL_PRIMITIVES
-			| RAY_FLAG_ACCEPT_FIRST_HIT_AND_END_SEARCH> query;
-	RayDesc rayDesc;
-	rayDesc.Origin = float3(0, 0, 0);
-	rayDesc.TMin = 0.0001;
-	rayDesc.Direction = float3(0, 1, 0);
-	rayDesc.TMax = 10000;
-	query.TraceRayInline(myAS, RAY_FLAG_ACCEPT_FIRST_HIT_AND_END_SEARCH, 0x1, rayDesc);
-	query.Proceed();
-	if(query.CommittedStatus() == COMMITTED_TRIANGLE_HIT) {
-		return float4(0,1,0,1);
-	}
-	else {
-		return float4(1,0,1,1);
-	}
+		static const char shaderCodeSceneClosestHit[] = R"#(
+struct Payload { float4 color; };
 
-	float4 color;
-	if (RootParamOffset < 8) {
-		color = ColorMap[RootParamOffset].Load(int3(0, 0, 0));
-	} else {
-		uint index = ((uint)(input.position.x) + (uint)(input.position.y)) % 8;
-		color = ColorMap[ NonUniformResourceIndex(index) ].Load(int3(0, 0, 0));
-	}
-	float intensity = input.normal.y * 0.5 + 0.5;
-	color.xyz *= intensity;
-	return color;
+[shader("closesthit")]
+void main(inout Payload payload, BuiltInTriangleIntersectionAttributes attr)
+{
+	float3 barycentrics = float3(1 - attr.barycentrics.x - attr.barycentrics.y, attr.barycentrics.x, attr.barycentrics.y);
+	Payload temp = { float4(barycentrics, 1) };
+	payload = temp;
+}
+)#";
+
+		static const char shaderCodeSceneMiss[] = R"#(
+struct Payload { float4 color; };
+
+[shader("miss")]
+void main(inout Payload payload)
+{
+	Payload temp = { float4(0.5, 0.5, 0.5, 1) };
+	payload = temp;
 }
 )#";
 
@@ -297,56 +287,117 @@ float4 main(Input input) : SV_Target {
 		ComPtr<IDxcLibrary> dxcLib;
 		CHK(DxcCreateInstance(CLSID_DxcLibrary, IID_PPV_ARGS(&dxcLib)));
 
-		ComPtr<IDxcBlobEncoding> dxcTxtSceneVS, dxcTxtScenePS;
-		CHK(dxcLib->CreateBlobWithEncodingFromPinned(shaderCodeSceneVS, _countof(shaderCodeSceneVS) - 1, CP_UTF8, &dxcTxtSceneVS));
-		CHK(dxcLib->CreateBlobWithEncodingFromPinned(shaderCodeScenePS, _countof(shaderCodeScenePS) - 1, CP_UTF8, &dxcTxtScenePS));
+		ComPtr<IDxcBlobEncoding> dxcTxtSceneRayGen, dxcTxtSceneClosestHit, dxcTxtSceneMiss;
+		CHK(dxcLib->CreateBlobWithEncodingFromPinned(shaderCodeSceneRayGen, _countof(shaderCodeSceneRayGen) - 1, CP_UTF8, &dxcTxtSceneRayGen));
+		CHK(dxcLib->CreateBlobWithEncodingFromPinned(shaderCodeSceneClosestHit, _countof(shaderCodeSceneClosestHit) - 1, CP_UTF8, &dxcTxtSceneClosestHit));
+		CHK(dxcLib->CreateBlobWithEncodingFromPinned(shaderCodeSceneMiss, _countof(shaderCodeSceneMiss) - 1, CP_UTF8, &dxcTxtSceneMiss));
 
-		ComPtr<IDxcBlob> dxcBlobShadowVS, dxcBlobSceneVS, dxcBlobScenePS;
+		ComPtr<IDxcBlob> dxcBlobSceneRayGen, dxcBlobSceneClosestHit, dxcBlobSceneMiss;
 		ComPtr<IDxcBlobEncoding> dxcError;
 		ComPtr<IDxcOperationResult> dxcRes;
-		const wchar_t* shaderArgs[] = { L"-Zi", L"-all_resources_bound", L"-Qembed_debug", L"-HV 2021"};
+		const wchar_t* shaderArgs[] = { L"-Zi", L"-all_resources_bound", L"-Qembed_debug"};
 
-		dxc->Compile(dxcTxtSceneVS.Get(), nullptr, L"main", L"vs_6_0", shaderArgs, _countof(shaderArgs), nullptr, 0, nullptr, &dxcRes);
+		dxc->Compile(dxcTxtSceneRayGen.Get(), nullptr, L"main", L"lib_6_3", shaderArgs, _countof(shaderArgs), nullptr, 0, nullptr, &dxcRes);
 		dxcRes->GetErrorBuffer(&dxcError);
 		if (dxcError->GetBufferSize()) {
 			OutputDebugStringA(reinterpret_cast<char*>(dxcError->GetBufferPointer()));
 			throw runtime_error("Shader compile error.");
 		}
-		dxcRes->GetResult(&dxcBlobSceneVS);
-		dxc->Compile(dxcTxtScenePS.Get(), nullptr, L"main", L"ps_6_5", shaderArgs, _countof(shaderArgs), nullptr, 0, nullptr, &dxcRes);
+		dxcRes->GetResult(&dxcBlobSceneRayGen);
+
+		dxc->Compile(dxcTxtSceneClosestHit.Get(), nullptr, L"main", L"lib_6_3", shaderArgs, _countof(shaderArgs), nullptr, 0, nullptr, &dxcRes);
 		dxcRes->GetErrorBuffer(&dxcError);
 		if (dxcError->GetBufferSize()) {
 			OutputDebugStringA(reinterpret_cast<char*>(dxcError->GetBufferPointer()));
 			throw runtime_error("Shader compile error.");
 		}
-		dxcRes->GetResult(&dxcBlobScenePS);
+		dxcRes->GetResult(&dxcBlobSceneClosestHit);
 
-		D3D12_INPUT_ELEMENT_DESC ieDesc[] = {
-			{ "POSITION", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0, 0, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0 },
-			{ "NORMAL", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0, 12, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0 }
-		};
+		dxc->Compile(dxcTxtSceneMiss.Get(), nullptr, L"main", L"lib_6_3", shaderArgs, _countof(shaderArgs), nullptr, 0, nullptr, &dxcRes);
+		dxcRes->GetErrorBuffer(&dxcError);
+		if (dxcError->GetBufferSize()) {
+			OutputDebugStringA(reinterpret_cast<char*>(dxcError->GetBufferPointer()));
+			throw runtime_error("Shader compile error.");
+		}
+		dxcRes->GetResult(&dxcBlobSceneMiss);
 
-		auto dsDesc = CD3DX12_DEPTH_STENCIL_DESC(CD3DX12_DEFAULT());
-		//dsDesc.DepthFunc = D3D12_COMPARISON_FUNC_GREATER;
-		auto rsDesc = CD3DX12_RASTERIZER_DESC(CD3DX12_DEFAULT());
-		//rsDesc.CullMode = D3D12_CULL_MODE_NONE;
+		// Raytracing PSO
 
-		D3D12_GRAPHICS_PIPELINE_STATE_DESC psoDesc = {};
-		psoDesc.pRootSignature = mSceneRootSig.Get();
-		psoDesc.VS = CD3DX12_SHADER_BYTECODE(dxcBlobSceneVS->GetBufferPointer(), dxcBlobSceneVS->GetBufferSize());
-		psoDesc.PS = CD3DX12_SHADER_BYTECODE(dxcBlobScenePS->GetBufferPointer(), dxcBlobScenePS->GetBufferSize());
-		psoDesc.InputLayout = { ieDesc, _countof(ieDesc) };
-		psoDesc.IBStripCutValue = D3D12_INDEX_BUFFER_STRIP_CUT_VALUE_DISABLED;
-		psoDesc.PrimitiveTopologyType = D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE;
-		psoDesc.RasterizerState = rsDesc;
-		psoDesc.DepthStencilState = dsDesc;
-		psoDesc.BlendState = CD3DX12_BLEND_DESC(CD3DX12_DEFAULT());
-		psoDesc.SampleMask = UINT_MAX;
-		psoDesc.NumRenderTargets = 1;
-		psoDesc.RTVFormats[0] = DXGI_FORMAT_R8G8B8A8_UNORM;
-		psoDesc.DSVFormat = DXGI_FORMAT_D32_FLOAT;
-		psoDesc.SampleDesc.Count = 1;
-		CHK(mDevice->CreateGraphicsPipelineState(&psoDesc, IID_PPV_ARGS(&mScenePSO)));
+		ComPtr<ID3D12Device5> device5;
+		CHK(mDevice.As(&device5));
+		{
+			CD3DX12_STATE_OBJECT_DESC rtDesc{ D3D12_STATE_OBJECT_TYPE_RAYTRACING_PIPELINE };
+
+			// DXIL library
+			auto libRG = rtDesc.CreateSubobject<CD3DX12_DXIL_LIBRARY_SUBOBJECT>();
+			auto libCH = rtDesc.CreateSubobject<CD3DX12_DXIL_LIBRARY_SUBOBJECT>();
+			auto libMiss = rtDesc.CreateSubobject<CD3DX12_DXIL_LIBRARY_SUBOBJECT>();
+			CD3DX12_SHADER_BYTECODE libDxilRG(dxcBlobSceneRayGen->GetBufferPointer(), dxcBlobSceneRayGen->GetBufferSize());
+			CD3DX12_SHADER_BYTECODE libDxilCH(dxcBlobSceneClosestHit->GetBufferPointer(), dxcBlobSceneClosestHit->GetBufferSize());
+			CD3DX12_SHADER_BYTECODE libDxilMiss(dxcBlobSceneMiss->GetBufferPointer(), dxcBlobSceneMiss->GetBufferSize());
+			libRG->SetDXILLibrary(&libDxilRG);
+			libRG->DefineExport(L"MyRayGen", L"main");
+			libCH->SetDXILLibrary(&libDxilCH);
+			libCH->DefineExport(L"MyClosestHit", L"main");
+			libMiss->SetDXILLibrary(&libDxilMiss);
+			libMiss->DefineExport(L"MyMiss", L"main");
+
+			auto hitGroup = rtDesc.CreateSubobject<CD3DX12_HIT_GROUP_SUBOBJECT>();
+			hitGroup->SetHitGroupType(D3D12_HIT_GROUP_TYPE_TRIANGLES);
+			hitGroup->SetHitGroupExport(L"MyHitGroup");
+			hitGroup->SetClosestHitShaderImport(L"MyClosestHit");
+
+			auto shaderConfig = rtDesc.CreateSubobject<CD3DX12_RAYTRACING_SHADER_CONFIG_SUBOBJECT>();
+			UINT payloadSize = 4 * sizeof(float);   // float4 color
+			UINT attributeSize = 2 * sizeof(float); // float2 barycentrics
+			shaderConfig->Config(payloadSize, attributeSize);
+
+			auto pipelineConfig = rtDesc.CreateSubobject<CD3DX12_RAYTRACING_PIPELINE_CONFIG_SUBOBJECT>();
+			pipelineConfig->Config(1); // Max recursion depth
+
+			// Local root signature is optional
+			auto rootSigLocal = rtDesc.CreateSubobject<CD3DX12_LOCAL_ROOT_SIGNATURE_SUBOBJECT>();
+			rootSigLocal->SetRootSignature(mSceneRootSigLocal.Get());
+			// Bind local root signature to shader stage
+			auto rootSigAssociation = rtDesc.CreateSubobject<CD3DX12_SUBOBJECT_TO_EXPORTS_ASSOCIATION_SUBOBJECT>();
+			rootSigAssociation->SetSubobjectToAssociate(*rootSigLocal);
+			rootSigAssociation->AddExport(L"MyRayGen");
+			rootSigAssociation->AddExport(L"MyClosestHit"); // On PIX null local signatures show warnings...
+			rootSigAssociation->AddExport(L"MyMiss");
+
+			// Global root signature is also optional, but it seems nessesary in most cases
+			auto rootSigGlobal = rtDesc.CreateSubobject<CD3DX12_GLOBAL_ROOT_SIGNATURE_SUBOBJECT>();
+			rootSigGlobal->SetRootSignature(mSceneRootSigGlobal.Get());
+
+			CHK(device5->CreateStateObject(rtDesc, IID_PPV_ARGS(&mStateObject)));
+		}
+
+		// Shader Table
+
+		{
+			uint32_t rayGenLocalRootConstantValue = 123; // todo
+
+			CHK(mStateObject.As(&mStateObjectProps));
+			void* pRayGenID = mStateObjectProps->GetShaderIdentifier(L"MyRayGen");
+			void* pMissID = mStateObjectProps->GetShaderIdentifier(L"MyMiss");
+			void* pHitGroupID = mStateObjectProps->GetShaderIdentifier(L"MyHitGroup");
+
+			uint8_t* sbt = (uint8_t*)alloca(oMax);
+			memset(sbt, 0, oMax); // zero fill
+			memcpy(sbt + oRayGen, pRayGenID, D3D12_SHADER_IDENTIFIER_SIZE_IN_BYTES);
+			memcpy(sbt + oRayGenRootConstant, &rayGenLocalRootConstantValue, sizeof(rayGenLocalRootConstantValue));
+			memcpy(sbt + oHitGroup, pHitGroupID, D3D12_SHADER_IDENTIFIER_SIZE_IN_BYTES);
+			memcpy(sbt + oMiss, pMissID, D3D12_SHADER_IDENTIFIER_SIZE_IN_BYTES);
+
+			auto heapProp = CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_UPLOAD);
+			auto resDesc = CD3DX12_RESOURCE_DESC::Buffer(oMax);
+			CHK(mDevice->CreateCommittedResource(
+				&heapProp, D3D12_HEAP_FLAG_NONE, &resDesc,
+				D3D12_RESOURCE_STATE_GENERIC_READ, nullptr, IID_PPV_ARGS(&mShaderBindingTable)));
+			void* gpuMem;
+			CHK(mShaderBindingTable->Map(0, nullptr, &gpuMem));
+			memcpy(gpuMem, sbt, oMax);
+		}
 
 		// Resources
 
@@ -361,18 +412,10 @@ float4 main(Input input) : SV_Target {
 
 		auto heapProp = CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_DEFAULT);
 		auto resDesc = CD3DX12_RESOURCE_DESC::Tex2D(DXGI_FORMAT_R8G8B8A8_UNORM, WINDOW_WIDTH, WINDOW_HEIGHT, 1, 1);
-		resDesc.Flags = D3D12_RESOURCE_FLAG_ALLOW_RENDER_TARGET;
-		auto clearValue = CD3DX12_CLEAR_VALUE(DXGI_FORMAT_R8G8B8A8_UNORM, kDefaultRTClearColor);
+		resDesc.Flags = D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS;
 		CHK(mDevice->CreateCommittedResource(
 			&heapProp, D3D12_HEAP_FLAG_NONE, &resDesc,
-			D3D12_RESOURCE_STATE_GENERIC_READ, &clearValue, IID_PPV_ARGS(&mSceneTex)));
-
-		resDesc = CD3DX12_RESOURCE_DESC::Tex2D(DXGI_FORMAT_D32_FLOAT, WINDOW_WIDTH, WINDOW_HEIGHT, 1, 1);
-		resDesc.Flags = D3D12_RESOURCE_FLAG_ALLOW_DEPTH_STENCIL | D3D12_RESOURCE_FLAG_DENY_SHADER_RESOURCE;
-		clearValue = CD3DX12_CLEAR_VALUE(DXGI_FORMAT_D32_FLOAT, kDefaultDSClearColor);
-		CHK(mDevice->CreateCommittedResource(
-			&heapProp, D3D12_HEAP_FLAG_NONE, &resDesc,
-			D3D12_RESOURCE_STATE_DEPTH_WRITE, &clearValue, IID_PPV_ARGS(&mSceneZ)));
+			D3D12_RESOURCE_STATE_GENERIC_READ, nullptr, IID_PPV_ARGS(&mSceneTex)));
 
 		heapProp = CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_UPLOAD);
 		resDesc = CD3DX12_RESOURCE_DESC::Buffer(4 * 1024 * 1024);
@@ -415,22 +458,6 @@ float4 main(Input input) : SV_Target {
 		}
 		mCmdListCopy->ResourceBarrier(MAX_DEFINED_RESOURCE, transitions);
 
-		descHeapDesc = {};
-		descHeapDesc.Type = D3D12_DESCRIPTOR_HEAP_TYPE_RTV;
-		descHeapDesc.NumDescriptors = (int)RTVs::Max;
-		CHK(mDevice->CreateDescriptorHeap(&descHeapDesc, IID_PPV_ARGS(&mRTV)));
-
-		CD3DX12_CPU_DESCRIPTOR_HANDLE rtvHandle(mRTV->GetCPUDescriptorHandleForHeapStart());
-		mDevice->CreateRenderTargetView(mSceneTex.Get(), nullptr, rtvHandle);
-
-		descHeapDesc = {};
-		descHeapDesc.Type = D3D12_DESCRIPTOR_HEAP_TYPE_DSV;
-		descHeapDesc.NumDescriptors = (int)DSVs::Max;
-		CHK(mDevice->CreateDescriptorHeap(&descHeapDesc, IID_PPV_ARGS(&mDSV)));
-
-		CD3DX12_CPU_DESCRIPTOR_HANDLE dsvHandle(mDSV->GetCPUDescriptorHandleForHeapStart());
-		mDevice->CreateDepthStencilView(mSceneZ.Get(), nullptr, dsvHandle);
-
 		for (int i = 0; i < BUFFER_COUNT; i++)
 		{
 			descHeapDesc = {};
@@ -441,6 +468,12 @@ float4 main(Input input) : SV_Target {
 
 			CD3DX12_CPU_DESCRIPTOR_HANDLE shaderViewHandle(mShaderView[i]->GetCPUDescriptorHandleForHeapStart());
 			auto addrCB = mConstantBuffer[i]->GetGPUVirtualAddress();
+
+			auto sv = CD3DX12_CPU_DESCRIPTOR_HANDLE(shaderViewHandle, (int)ShaderViews::SceneTexture, mResourceStride);
+			D3D12_UNORDERED_ACCESS_VIEW_DESC uav = {};
+			uav.ViewDimension = D3D12_UAV_DIMENSION_TEXTURE2D;
+			uav.Format = mSceneTex->GetDesc().Format;
+			mDevice->CreateUnorderedAccessView(mSceneTex.Get(), nullptr, &uav, sv);
 
 			for (int i = 0; i < MAX_BINDLESS_RESOURCE; ++i) {
 				D3D12_SHADER_RESOURCE_VIEW_DESC srv = {};
@@ -456,8 +489,8 @@ float4 main(Input input) : SV_Target {
 			D3D12_CONSTANT_BUFFER_VIEW_DESC cbv = {};
 			cbv.BufferLocation = addrCB + 256 * (int)Constants::SceneMatrix;
 			cbv.SizeInBytes = 256;
-			auto sv = CD3DX12_CPU_DESCRIPTOR_HANDLE(shaderViewHandle, (int)ShaderViews::SceneCBVMatrix, mResourceStride);
-			mDevice->CreateConstantBufferView(&cbv, sv);
+			auto sv_c = CD3DX12_CPU_DESCRIPTOR_HANDLE(shaderViewHandle, (int)ShaderViews::SceneCBVMatrix, mResourceStride);
+			mDevice->CreateConstantBufferView(&cbv, sv_c);
 		}
 
 		descHeapDesc = {};
@@ -565,13 +598,6 @@ float4 main(Input input) : SV_Target {
 		CHK(mIBPlane->Map(0, nullptr, &gpuMem));
 		memcpy(gpuMem, indices.data(), sizeIB);
 
-		mVBPlaneView.BufferLocation = mVBPlane->GetGPUVirtualAddress();
-		mVBPlaneView.StrideInBytes = sizeof(VertexElement);
-		mVBPlaneView.SizeInBytes = sizeVB;
-		mIBPlaneView.BufferLocation = mIBPlane->GetGPUVirtualAddress();
-		mIBPlaneView.Format = DXGI_FORMAT_R16_UINT;
-		mIBPlaneView.SizeInBytes = sizeIB;
-
 		// DMA
 
 		ComPtr<ID3D12Fence> fenceCopy;
@@ -581,11 +607,11 @@ float4 main(Input input) : SV_Target {
 		ID3D12GraphicsCommandList* cmdLists[] = { mCmdListCopy.Get() };
 		mCmdQueueCopy->ExecuteCommandLists(1, CommandListCast(cmdLists));
 		CHK(mCmdQueueCopy->Signal(fenceCopy.Get(), 1));
-		BuildRaytracnig(fenceCopy.Get()); // Include command wait
+		BuildBVH(fenceCopy.Get()); // Include command wait
 		CHK(mCmdAllocCopy->Reset());
 	}
 
-	void BuildRaytracnig(ID3D12Fence* fenceCopy)
+	void BuildBVH(ID3D12Fence* fenceCopy)
 	{
 		ComPtr<ID3D12Device5> device5;
 		CHK(mDevice.As(&device5));
@@ -611,13 +637,20 @@ float4 main(Input input) : SV_Target {
 		D3D12_RAYTRACING_GEOMETRY_DESC blasGeomDesc = {};
 		blasGeomDesc.Type = D3D12_RAYTRACING_GEOMETRY_TYPE_TRIANGLES;
 		blasGeomDesc.Flags = D3D12_RAYTRACING_GEOMETRY_FLAG_OPAQUE;
-		blasGeomDesc.Triangles.IndexFormat = DXGI_FORMAT_R16_UINT;
 		blasGeomDesc.Triangles.VertexFormat = DXGI_FORMAT_R32G32B32_FLOAT;
 		blasGeomDesc.Triangles.VertexCount = (SphereStacks + 1) * (SphereSlices + 1);
-		blasGeomDesc.Triangles.IndexCount = (SphereStacks * SphereSlices);
+		blasGeomDesc.Triangles.IndexFormat = DXGI_FORMAT_R16_UINT;
+		blasGeomDesc.Triangles.IndexCount = (SphereStacks * SphereSlices) * 6;
 		blasGeomDesc.Triangles.IndexBuffer = mIB->GetGPUVirtualAddress();
 		blasGeomDesc.Triangles.VertexBuffer.StartAddress = mVB->GetGPUVirtualAddress();
 		blasGeomDesc.Triangles.VertexBuffer.StrideInBytes = sizeof(VertexElement);
+#if 0
+		blasGeomDesc.Triangles.VertexCount = 4;
+		blasGeomDesc.Triangles.IndexCount = 6;
+		blasGeomDesc.Triangles.IndexBuffer = mIBPlane->GetGPUVirtualAddress();
+		blasGeomDesc.Triangles.VertexBuffer.StartAddress = mVBPlane->GetGPUVirtualAddress();
+		blasGeomDesc.Triangles.VertexBuffer.StrideInBytes = sizeof(VertexElement);
+#endif
 		D3D12_BUILD_RAYTRACING_ACCELERATION_STRUCTURE_INPUTS blasInput = {};
 		blasInput.Type = D3D12_RAYTRACING_ACCELERATION_STRUCTURE_TYPE_BOTTOM_LEVEL;
 		blasInput.Flags = D3D12_RAYTRACING_ACCELERATION_STRUCTURE_BUILD_FLAG_NONE;
@@ -655,7 +688,7 @@ float4 main(Input input) : SV_Target {
 		instanceDesc[0].Transform[0][0] = instanceDesc[0].Transform[1][1] = instanceDesc[0].Transform[2][2] = 1.0f;
 		instanceDesc[0].InstanceMask = 1;
 		instanceDesc[0].AccelerationStructure = mBlas->GetGPUVirtualAddress();
-		//tlasDesc.Flags = D3D12_RAYTRACING_INSTANCE_FLAG_TRIANGLE_CULL_DISABLE;
+		//instanceDesc[0].Flags = D3D12_RAYTRACING_INSTANCE_FLAG_TRIANGLE_CULL_DISABLE;
 
 		heapProp = CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_UPLOAD);
 		resDesc = CD3DX12_RESOURCE_DESC::Buffer(sizeof(instanceDesc));
@@ -708,6 +741,21 @@ float4 main(Input input) : SV_Target {
 			Sleep(1);
 		};
 		CHK(cmdAlloc->Reset());
+
+		// Create views
+
+		// AccelerationStructure
+		for (int i = 0; i < BUFFER_COUNT; i++)
+		{
+			CD3DX12_CPU_DESCRIPTOR_HANDLE shaderViewHandle(mShaderView[i]->GetCPUDescriptorHandleForHeapStart());
+
+			auto sv = CD3DX12_CPU_DESCRIPTOR_HANDLE(shaderViewHandle, (int)ShaderViews::AccelerationStructure, mResourceStride);
+			D3D12_SHADER_RESOURCE_VIEW_DESC srv = {};
+			srv.ViewDimension = D3D12_SRV_DIMENSION_RAYTRACING_ACCELERATION_STRUCTURE;
+			srv.RaytracingAccelerationStructure.Location = mTlas->GetGPUVirtualAddress();
+			srv.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
+			mDevice->CreateShaderResourceView(nullptr, &srv, sv);
+		}
 	}
 
 	void Draw()
@@ -715,21 +763,17 @@ float4 main(Input input) : SV_Target {
 		mFrameCount++;
 		auto frameIndex = mSwapChain->GetCurrentBackBufferIndex();
 
+		ComPtr<ID3D12GraphicsCommandList4> cmdList4;
+		CHK(mCmdList.As(&cmdList4));
+
 		//-------------------------------
 
 		float* pCB;
 		CHK(mConstantBuffer[mFrameCount % BUFFER_COUNT]->Map(0, nullptr, reinterpret_cast<void**>(&pCB)));
 		float* pCBSceneMatrix = pCB + 256 * (int)Constants::SceneMatrix / sizeof(*pCB);
 
-		auto rtvScene = CD3DX12_CPU_DESCRIPTOR_HANDLE(mRTV->GetCPUDescriptorHandleForHeapStart());
-
-		auto dsvScene = CD3DX12_CPU_DESCRIPTOR_HANDLE(mDSV->GetCPUDescriptorHandleForHeapStart());
-		auto dsvShadow = CD3DX12_CPU_DESCRIPTOR_HANDLE(dsvScene, mDSVStride);
-
 		CD3DX12_GPU_DESCRIPTOR_HANDLE svBase(mShaderView[mFrameCount % BUFFER_COUNT]->GetGPUDescriptorHandleForHeapStart());
-		auto svShadow = svBase;
-		auto svSceneVS = CD3DX12_GPU_DESCRIPTOR_HANDLE(svBase, (int)ShaderViews::SceneCBVMatrix, mResourceStride);
-		auto svScenePS = CD3DX12_GPU_DESCRIPTOR_HANDLE(svBase, (int)ShaderViews::SceneBindlessResource, mResourceStride);
+		auto svScene = svBase;
 
 		auto samplerDefault = CD3DX12_GPU_DESCRIPTOR_HANDLE(mSampler->GetGPUDescriptorHandleForHeapStart());
 
@@ -767,36 +811,30 @@ float4 main(Input input) : SV_Target {
 
 		CD3DX12_RESOURCE_BARRIER transitions[10];
 		transitions[0] = CD3DX12_RESOURCE_BARRIER::Transition(mSceneTex.Get(),
-			D3D12_RESOURCE_STATE_GENERIC_READ, D3D12_RESOURCE_STATE_RENDER_TARGET);
+			D3D12_RESOURCE_STATE_GENERIC_READ, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
 		mCmdList->ResourceBarrier(1, transitions);
 
-		mCmdList->ClearRenderTargetView(rtvScene, kDefaultRTClearColor, 0, nullptr);
-		mCmdList->ClearDepthStencilView(dsvScene, D3D12_CLEAR_FLAG_DEPTH, kDefaultDSClearColor[0], 0, 0, nullptr);
-
-		mCmdList->SetGraphicsRootSignature(mSceneRootSig.Get());
-		mCmdList->SetPipelineState(mScenePSO.Get());
-		mCmdList->SetGraphicsRootDescriptorTable(0, svSceneVS); // VS, CBV_SRV_UAV
-		mCmdList->SetGraphicsRootDescriptorTable(1, svScenePS); // PS, CBV_SRV_UAV
-		mCmdList->SetGraphicsRoot32BitConstant(2, static_cast<UINT>(mBindlessTextureIndex), 0); // PS, RootConstant
-		//mCmdList->SetGraphicsRootDescriptorTable(2, samplerDefault); // PS, Sampler
-		mCmdList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
-		mCmdList->IASetVertexBuffers(0, 1, &mVBView);
-		mCmdList->IASetIndexBuffer(&mIBView);
-		auto viewport = CD3DX12_VIEWPORT(0.0f, 0.0f, (float)WINDOW_WIDTH, (float)WINDOW_HEIGHT);
-		mCmdList->RSSetViewports(1, &viewport);
-		auto scissor = CD3DX12_RECT(0, 0, WINDOW_WIDTH, WINDOW_HEIGHT);
-		mCmdList->RSSetScissorRects(1, &scissor);
-		mCmdList->OMSetRenderTargets(1, &rtvScene, TRUE, &dsvScene);
-		mCmdList->DrawIndexedInstanced(6 * SphereStacks * SphereSlices, 1, 0, 0, 0);
-
-		mCmdList->IASetVertexBuffers(0, 1, &mVBPlaneView);
-		mCmdList->IASetIndexBuffer(&mIBPlaneView);
-		mCmdList->DrawIndexedInstanced(6, 1, 0, 0, 0);
+		mCmdList->SetComputeRootSignature(mSceneRootSigGlobal.Get());
+		mCmdList->SetComputeRootDescriptorTable(0, svScene);
+		cmdList4->SetPipelineState1(mStateObject.Get());
+		D3D12_DISPATCH_RAYS_DESC drDesc = {};
+		drDesc.RayGenerationShaderRecord.StartAddress = mShaderBindingTable->GetGPUVirtualAddress();
+		drDesc.RayGenerationShaderRecord.SizeInBytes = oHitGroup;
+		drDesc.HitGroupTable.StartAddress = drDesc.RayGenerationShaderRecord.StartAddress + oHitGroup;
+		drDesc.HitGroupTable.SizeInBytes = oMiss - oHitGroup;
+		drDesc.HitGroupTable.StrideInBytes = oMiss - oHitGroup;
+		drDesc.MissShaderTable.StartAddress = drDesc.RayGenerationShaderRecord.StartAddress + oMiss;
+		drDesc.MissShaderTable.SizeInBytes = oMax - oMiss;
+		drDesc.MissShaderTable.StrideInBytes = oMax - oMiss;
+		drDesc.Width = WINDOW_WIDTH;
+		drDesc.Height = WINDOW_HEIGHT;
+		drDesc.Depth = 1;
+		cmdList4->DispatchRays(&drDesc);
 
 		// Copy scene image to swap chain
 
 		transitions[0] = CD3DX12_RESOURCE_BARRIER::Transition(mSceneTex.Get(),
-			D3D12_RESOURCE_STATE_RENDER_TARGET, D3D12_RESOURCE_STATE_GENERIC_READ);
+			D3D12_RESOURCE_STATE_UNORDERED_ACCESS, D3D12_RESOURCE_STATE_GENERIC_READ);
 		transitions[1] = CD3DX12_RESOURCE_BARRIER::Transition(mSwapChainTex[frameIndex].Get(),
 			D3D12_RESOURCE_STATE_PRESENT, D3D12_RESOURCE_STATE_COPY_DEST);
 		mCmdList->ResourceBarrier(2, transitions);
