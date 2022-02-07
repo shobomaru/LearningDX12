@@ -234,25 +234,29 @@ public:
 #define SHADER_INC_PER_BOTTOM_INSTANCE 0
 struct Payload { float4 color; };
 
-cbuffer CScene {
-	float4x4 ViewProj;
+cbuffer CScene : register(b0) {
+	float4x4 InvViewProj;
+	float4 CameraPos;
 };
 RaytracingAccelerationStructure myAS : register(t0);
 RWTexture2D<float4> myTarget : register(u0);
 [shader("raygeneration")]
 void main()
 {
-	float2 uv = (float2)DispatchRaysIndex() / (float2)DispatchRaysDimensions();
-	uv = uv * 2 - 1;
+	float2 svpos = (0.5 + (float2)DispatchRaysIndex()) / (float2)DispatchRaysDimensions();
+	float3 ndc = float3(svpos.x * 2 - 1, svpos.y * -2 + 1, 1);
+	float4 farPos = mul(float4(ndc, 1), InvViewProj);
+	farPos.xyz /= farPos.w;
 	RayDesc ray;
-	ray.Origin = float3(0 + uv.x, 0 + uv.y, -10);
-	ray.Direction = normalize(float3(0, 0, 1));
+	ray.Origin = CameraPos.xyz;
+	ray.Direction = normalize(farPos.xyz - CameraPos.xyz);
 	ray.TMin = 0.01;
 	ray.TMax = 100.0;
 	Payload payload = { (float4)0 };
 	TraceRay(myAS,
 		RAY_FLAG_CULL_NON_OPAQUE | RAY_FLAG_ACCEPT_FIRST_HIT_AND_END_SEARCH,
 		0x1, 0, SHADER_INC_PER_BOTTOM_INSTANCE, 0, ray, payload);
+	//myTarget[DispatchRaysIndex().xy] = float4(farPos.xyz*0.5+0.5,1)+0.0000000001* payload.color;
 	myTarget[DispatchRaysIndex().xy] = payload.color;
 }
 )#";
@@ -788,16 +792,16 @@ void main(inout Payload payload)
 		auto viewMat = DirectX::XMMatrixLookAtLH(mCameraPos, mCameraTarget, mCameraUp);
 		auto projMat = DirectX::XMMatrixPerspectiveFovLH(fov, aspect, nearClip, farClip);
 
-		auto shadowDir = DirectX::XMVectorSet(0.0f, -1.0f, 0.0f, 0);
-		auto shadowPos = DirectX::XMVectorSet(0.0f, 5.0f, 0.0f, 0);
-		auto shadowUp = DirectX::XMVectorSet(0.0f, 0.0f, 1.0f, 0);
-		auto shadowRange = 1.0f;
-		auto shadowDistance = 10.0f;
+		struct CBSceneMatrix {
+			DirectX::XMMATRIX invViewProj;
+			DirectX::XMVECTOR cameraPos;
+		} sceneMatrix;
+		static_assert(sizeof(sceneMatrix) <= 256, "");
 
-		auto shadowViewMat = DirectX::XMMatrixLookAtLH(shadowPos, DirectX::XMVectorAdd(shadowPos, shadowDir), shadowUp);
-		auto shadowProjMat = DirectX::XMMatrixOrthographicLH(shadowRange * 2, shadowRange * 2, 0, shadowDistance);
-
-		*reinterpret_cast<DirectX::XMMATRIX*>(pCBSceneMatrix) = DirectX::XMMatrixTranspose(worldMat * viewMat * projMat);
+		sceneMatrix.invViewProj = DirectX::XMMatrixTranspose(
+			DirectX::XMMatrixInverse(nullptr, worldMat * viewMat * projMat));
+		sceneMatrix.cameraPos = mCameraPos;
+		memcpy(pCBSceneMatrix, &sceneMatrix, sizeof(sceneMatrix));
 
 		// Start recording commands
 
