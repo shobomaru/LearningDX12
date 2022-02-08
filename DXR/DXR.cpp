@@ -464,11 +464,11 @@ void main(inout Payload payload)
 
 			static const float colors[MAX_DEFINED_RESOURCE][4] = {
 				{1.0f, 0.0f, 0.0f, 1.0f},
-				{0.5f, 0.5f, 0.0f, 1.0f},
+				{0.7f, 0.7f, 0.0f, 1.0f},
 				{0.0f, 1.0f, 0.0f, 1.0f},
-				{0.0f, 0.5f, 0.5f, 1.0f},
+				{0.0f, 0.7f, 0.7f, 1.0f},
 				{0.0f, 0.0f, 1.0f, 1.0f},
-				{0.5f, 0.0f, 0.5f, 1.0f},
+				{0.7f, 0.0f, 0.7f, 1.0f},
 				{0.5f, 0.5f, 0.5f, 1.0f},
 				{1.0f, 1.0f, 1.0f, 1.0f},
 			};
@@ -655,77 +655,108 @@ void main(inout Payload payload)
 
 		// Prebuild BLAS
 
-		D3D12_RAYTRACING_GEOMETRY_DESC blasGeomDesc = {};
-		blasGeomDesc.Type = D3D12_RAYTRACING_GEOMETRY_TYPE_TRIANGLES;
-		blasGeomDesc.Flags = D3D12_RAYTRACING_GEOMETRY_FLAG_OPAQUE;
-		blasGeomDesc.Triangles.VertexFormat = DXGI_FORMAT_R32G32B32_FLOAT;
-		blasGeomDesc.Triangles.VertexCount = (SphereStacks + 1) * (SphereSlices + 1);
-		blasGeomDesc.Triangles.IndexFormat = DXGI_FORMAT_R16_UINT;
-		blasGeomDesc.Triangles.IndexCount = (SphereStacks * SphereSlices) * 6;
-		blasGeomDesc.Triangles.IndexBuffer = mIB->GetGPUVirtualAddress();
-		blasGeomDesc.Triangles.VertexBuffer.StartAddress = mVB->GetGPUVirtualAddress();
-		blasGeomDesc.Triangles.VertexBuffer.StrideInBytes = sizeof(VertexElement);
-#if 0
-		blasGeomDesc.Triangles.VertexCount = 4;
-		blasGeomDesc.Triangles.IndexCount = 6;
-		blasGeomDesc.Triangles.IndexBuffer = mIBPlane->GetGPUVirtualAddress();
-		blasGeomDesc.Triangles.VertexBuffer.StartAddress = mVBPlane->GetGPUVirtualAddress();
-		blasGeomDesc.Triangles.VertexBuffer.StrideInBytes = sizeof(VertexElement);
-#endif
-		D3D12_BUILD_RAYTRACING_ACCELERATION_STRUCTURE_INPUTS blasInput = {};
+		D3D12_RAYTRACING_GEOMETRY_DESC blasGeomDescs[2] = {};
+		// Sphere
+		blasGeomDescs[0].Type = D3D12_RAYTRACING_GEOMETRY_TYPE_TRIANGLES;
+		blasGeomDescs[0].Flags = D3D12_RAYTRACING_GEOMETRY_FLAG_OPAQUE;
+		blasGeomDescs[0].Triangles.VertexFormat = DXGI_FORMAT_R32G32B32_FLOAT;
+		blasGeomDescs[0].Triangles.VertexCount = (SphereStacks + 1) * (SphereSlices + 1);
+		blasGeomDescs[0].Triangles.IndexFormat = DXGI_FORMAT_R16_UINT;
+		blasGeomDescs[0].Triangles.IndexCount = (SphereStacks * SphereSlices) * 6;
+		blasGeomDescs[0].Triangles.IndexBuffer = mIB->GetGPUVirtualAddress();
+		blasGeomDescs[0].Triangles.VertexBuffer.StartAddress = mVB->GetGPUVirtualAddress();
+		blasGeomDescs[0].Triangles.VertexBuffer.StrideInBytes = sizeof(VertexElement);
+		// Plane
+		blasGeomDescs[1] = blasGeomDescs[0];
+		blasGeomDescs[1].Triangles.VertexCount = 4;
+		blasGeomDescs[1].Triangles.IndexCount = 6;
+		blasGeomDescs[1].Triangles.IndexBuffer = mIBPlane->GetGPUVirtualAddress();
+		blasGeomDescs[1].Triangles.VertexBuffer.StartAddress = mVBPlane->GetGPUVirtualAddress();
+		// Two geometries can merge together, but shaders cannot classify each other on SM6.3
+
+		D3D12_BUILD_RAYTRACING_ACCELERATION_STRUCTURE_INPUTS blasInput = {}, blasPlaneInput = {};
+		// Sphere
 		blasInput.Type = D3D12_RAYTRACING_ACCELERATION_STRUCTURE_TYPE_BOTTOM_LEVEL;
 		blasInput.Flags = D3D12_RAYTRACING_ACCELERATION_STRUCTURE_BUILD_FLAG_NONE;
 		blasInput.NumDescs = 1;
 		blasInput.DescsLayout = D3D12_ELEMENTS_LAYOUT_ARRAY;
-		blasInput.pGeometryDescs = &blasGeomDesc;
-		D3D12_RAYTRACING_ACCELERATION_STRUCTURE_PREBUILD_INFO blasPrebuildInfo;
+		blasInput.pGeometryDescs = blasGeomDescs + 0;
+		D3D12_RAYTRACING_ACCELERATION_STRUCTURE_PREBUILD_INFO blasPrebuildInfo, blasPlanePrebuildInfo;
 		device5->GetRaytracingAccelerationStructurePrebuildInfo(&blasInput, &blasPrebuildInfo);
+		// Plane
+		blasPlaneInput = blasInput;
+		blasPlaneInput.pGeometryDescs = blasGeomDescs + 1;
+		device5->GetRaytracingAccelerationStructurePrebuildInfo(&blasPlaneInput, &blasPlanePrebuildInfo);
 
+		// Scratch(Sphere + Plane)
 		auto heapProp = CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_DEFAULT);
-		auto resDesc = CD3DX12_RESOURCE_DESC::Buffer(blasPrebuildInfo.ScratchDataSizeInBytes, D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS);
+		UINT64 scratchSize =
+			Align(blasPrebuildInfo.ScratchDataSizeInBytes, D3D12_DEFAULT_RESOURCE_PLACEMENT_ALIGNMENT)
+			+ blasPlanePrebuildInfo.ScratchDataSizeInBytes;
+		auto resDesc = CD3DX12_RESOURCE_DESC::Buffer(scratchSize, D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS);
 		CHK(mDevice->CreateCommittedResource(
 			&heapProp, D3D12_HEAP_FLAG_NONE, &resDesc,
 			D3D12_RESOURCE_STATE_COMMON, nullptr, IID_PPV_ARGS(&scratchBufBlas)));
 
+		// Sphere
 		resDesc = CD3DX12_RESOURCE_DESC::Buffer(blasPrebuildInfo.ResultDataMaxSizeInBytes, D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS);
 		CHK(mDevice->CreateCommittedResource(
 			&heapProp, D3D12_HEAP_FLAG_NONE, &resDesc,
 			D3D12_RESOURCE_STATE_RAYTRACING_ACCELERATION_STRUCTURE, nullptr, IID_PPV_ARGS(&mBlas)));
+		// Plane
+		resDesc = CD3DX12_RESOURCE_DESC::Buffer(blasPlanePrebuildInfo.ResultDataMaxSizeInBytes, D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS);
+		CHK(mDevice->CreateCommittedResource(
+			&heapProp, D3D12_HEAP_FLAG_NONE, &resDesc,
+			D3D12_RESOURCE_STATE_RAYTRACING_ACCELERATION_STRUCTURE, nullptr, IID_PPV_ARGS(&mBlasPlane)));
 
 		// Build BLAS
 
-		D3D12_BUILD_RAYTRACING_ACCELERATION_STRUCTURE_DESC blasDesc = {};
+		D3D12_BUILD_RAYTRACING_ACCELERATION_STRUCTURE_DESC blasDesc = {}, blasPlaneDesc = {};
+		// Sphere
 		blasDesc.Inputs = blasInput;
 		blasDesc.ScratchAccelerationStructureData = scratchBufBlas->GetGPUVirtualAddress();
 		blasDesc.DestAccelerationStructureData = mBlas->GetGPUVirtualAddress();
 		cmdList4->BuildRaytracingAccelerationStructure(&blasDesc, 0, nullptr);
+		// Plane
+		blasPlaneDesc.Inputs = blasPlaneInput;
+		blasPlaneDesc.ScratchAccelerationStructureData = scratchBufBlas->GetGPUVirtualAddress()
+			+ Align(blasPrebuildInfo.ScratchDataSizeInBytes, D3D12_DEFAULT_RESOURCE_PLACEMENT_ALIGNMENT);
+		blasPlaneDesc.DestAccelerationStructureData = mBlasPlane->GetGPUVirtualAddress();
+		cmdList4->BuildRaytracingAccelerationStructure(&blasPlaneDesc, 0, nullptr);
 
-		auto uavBarrier = CD3DX12_RESOURCE_BARRIER::UAV(mBlas.Get());
-		cmdList4->ResourceBarrier(1, &uavBarrier);
+		CD3DX12_RESOURCE_BARRIER uavBarriers[] = {
+			CD3DX12_RESOURCE_BARRIER::UAV(mBlas.Get()),
+			CD3DX12_RESOURCE_BARRIER::UAV(mBlasPlane.Get())
+		};
+		cmdList4->ResourceBarrier(_countof(uavBarriers), uavBarriers);
 
 		// Setup TLAS
 
-		D3D12_RAYTRACING_INSTANCE_DESC instanceDesc[1] = {};
-		instanceDesc[0].Transform[0][0] = instanceDesc[0].Transform[1][1] = instanceDesc[0].Transform[2][2] = 1.0f;
-		instanceDesc[0].InstanceMask = 1;
-		instanceDesc[0].AccelerationStructure = mBlas->GetGPUVirtualAddress();
+		D3D12_RAYTRACING_INSTANCE_DESC instanceDescs[2] = {};
+		// Sphere
+		instanceDescs[0].Transform[0][0] = instanceDescs[0].Transform[1][1] = instanceDescs[0].Transform[2][2] = 1.0f;
+		instanceDescs[0].InstanceMask = 1;
+		instanceDescs[0].AccelerationStructure = mBlas->GetGPUVirtualAddress();
 		//instanceDesc[0].Flags = D3D12_RAYTRACING_INSTANCE_FLAG_TRIANGLE_CULL_DISABLE;
+		// Plane
+		instanceDescs[1] = instanceDescs[0];
+		instanceDescs[1].AccelerationStructure = mBlasPlane->GetGPUVirtualAddress();
 
 		heapProp = CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_UPLOAD);
-		resDesc = CD3DX12_RESOURCE_DESC::Buffer(sizeof(instanceDesc));
+		resDesc = CD3DX12_RESOURCE_DESC::Buffer(sizeof(instanceDescs));
 		CHK(mDevice->CreateCommittedResource(
 			&heapProp, D3D12_HEAP_FLAG_NONE, &resDesc,
 			D3D12_RESOURCE_STATE_GENERIC_READ, nullptr, IID_PPV_ARGS(&mTlasInstance)));
 		void* gpuMem;
 		CHK(mTlasInstance->Map(0, nullptr, &gpuMem));
-		memcpy(gpuMem, instanceDesc, sizeof(instanceDesc));
+		memcpy(gpuMem, instanceDescs, sizeof(instanceDescs));
 
 		// Prebuild TLAS
 
 		D3D12_BUILD_RAYTRACING_ACCELERATION_STRUCTURE_INPUTS tlasInput = {};
 		tlasInput.Type = D3D12_RAYTRACING_ACCELERATION_STRUCTURE_TYPE_TOP_LEVEL;
 		tlasInput.Flags = D3D12_RAYTRACING_ACCELERATION_STRUCTURE_BUILD_FLAG_NONE;
-		tlasInput.NumDescs = _countof(instanceDesc);
+		tlasInput.NumDescs = _countof(instanceDescs);
 		tlasInput.DescsLayout = D3D12_ELEMENTS_LAYOUT_ARRAY;
 		tlasInput.InstanceDescs = mTlasInstance->GetGPUVirtualAddress();
 		D3D12_RAYTRACING_ACCELERATION_STRUCTURE_PREBUILD_INFO tlasPrebuildInfo;
