@@ -89,8 +89,6 @@ class D3D
 
 	ComPtr<ID3D12Resource> mVB;
 	ComPtr<ID3D12Resource> mIB;
-	D3D12_VERTEX_BUFFER_VIEW mVBView = {};
-	D3D12_INDEX_BUFFER_VIEW mIBView = {};
 	const int SphereSlices = 12;
 	const int SphereStacks = 12;
 
@@ -106,12 +104,10 @@ class D3D
 	ComPtr<ID3D12StateObjectProperties> mStateObjectProps;
 	ComPtr<ID3D12RootSignature> mSceneRootSigGlobal;
 	ComPtr<ID3D12RootSignature> mSceneRootSigLocal;
-	ComPtr<ID3D12Resource> mShaderBindingTable;
+	ComPtr<ID3D12RootSignature> mSceneRootSigLocalNull;
+	ComPtr<ID3D12Resource> mShaderBindingTable[BUFFER_COUNT];
 
-	const float kDefaultDSClearColor[4] = { 1.0f, 0.0f, 0.0f, 0.0f };
-	const float kDefaultRTClearColor[4] = { 0.1f, 0.2f, 0.4f, 0.0f };
-
-	int Align(int val, int align)
+	static int Align(int val, int align)
 	{
 		return ((val + align - 1) & ~(align - 1));
 	}
@@ -121,6 +117,8 @@ class D3D
 	const uint32_t oHitGroup = Align(oRayGenRootConstant + 4, D3D12_RAYTRACING_SHADER_TABLE_BYTE_ALIGNMENT);
 	const uint32_t oMiss = Align(oHitGroup + D3D12_SHADER_IDENTIFIER_SIZE_IN_BYTES, D3D12_RAYTRACING_SHADER_TABLE_BYTE_ALIGNMENT);
 	const uint32_t oMax = Align(oMiss + D3D12_SHADER_IDENTIFIER_SIZE_IN_BYTES, D3D12_RAYTRACING_SHADER_TABLE_BYTE_ALIGNMENT);
+
+	unique_ptr<uint8_t[]> mShaderBindingTableDefaultData;
 
 public:
 	~D3D()
@@ -222,18 +220,26 @@ public:
 		CHK(D3D12SerializeRootSignature(&rootSigDesc, D3D_ROOT_SIGNATURE_VERSION_1, &rootSigBlob, &rootSigError));
 		CHK(mDevice->CreateRootSignature(0, rootSigBlob->GetBufferPointer(), rootSigBlob->GetBufferSize(), IID_PPV_ARGS(&mSceneRootSigGlobal)));
 
-		rootParam[0].InitAsConstants(0, 1); // b0, space1
+		rootParam[0].InitAsConstants(1, 0, 1); // b0, space1
 		rootSigDesc.Init(1, rootParam, 0, nullptr, D3D12_ROOT_SIGNATURE_FLAG_LOCAL_ROOT_SIGNATURE);
 
 		CHK(D3D12SerializeRootSignature(&rootSigDesc, D3D_ROOT_SIGNATURE_VERSION_1, &rootSigBlob, &rootSigError));
 		CHK(mDevice->CreateRootSignature(0, rootSigBlob->GetBufferPointer(), rootSigBlob->GetBufferSize(), IID_PPV_ARGS(&mSceneRootSigLocal)));
 
+		rootSigDesc.Init(0, nullptr, 0, nullptr, D3D12_ROOT_SIGNATURE_FLAG_LOCAL_ROOT_SIGNATURE); // none
+
+		CHK(D3D12SerializeRootSignature(&rootSigDesc, D3D_ROOT_SIGNATURE_VERSION_1, &rootSigBlob, &rootSigError));
+		CHK(mDevice->CreateRootSignature(0, rootSigBlob->GetBufferPointer(), rootSigBlob->GetBufferSize(), IID_PPV_ARGS(&mSceneRootSigLocalNull)));
+
 		// Shader
 
 		static const char shaderCodeSceneRayGen[] = R"#(
 #define SHADER_INC_PER_BOTTOM_INSTANCE 0
-struct Payload { float4 color; };
+struct Payload { float4 color; uint mode; };
 
+cbuffer CMode : register(b0, space1) {
+	uint Mode;
+};
 cbuffer CScene : register(b0) {
 	float4x4 InvViewProj;
 	float4 CameraPos;
@@ -247,40 +253,52 @@ void main()
 	float3 ndc = float3(svpos.x * 2 - 1, svpos.y * -2 + 1, 1);
 	float4 farPos = mul(float4(ndc, 1), InvViewProj);
 	farPos.xyz /= farPos.w;
+
 	RayDesc ray;
 	ray.Origin = CameraPos.xyz;
 	ray.Direction = normalize(farPos.xyz - CameraPos.xyz);
 	ray.TMin = 0.01;
 	ray.TMax = 100.0;
-	Payload payload = { (float4)0 };
-	TraceRay(myAS,
-		RAY_FLAG_CULL_NON_OPAQUE | RAY_FLAG_ACCEPT_FIRST_HIT_AND_END_SEARCH,
+	Payload payload = { (float4)0, Mode };
+	TraceRay(myAS, RAY_FLAG_CULL_NON_OPAQUE,
 		0x1, 0, SHADER_INC_PER_BOTTOM_INSTANCE, 0, ray, payload);
-	//myTarget[DispatchRaysIndex().xy] = float4(farPos.xyz*0.5+0.5,1)+0.0000000001* payload.color;
+
 	myTarget[DispatchRaysIndex().xy] = payload.color;
 }
 )#";
 
 		static const char shaderCodeSceneClosestHit[] = R"#(
-struct Payload { float4 color; };
+struct Payload { float4 color; uint mode; };
 
+Texture2D<float4> ColorMap[] : register(t0, space1);
 [shader("closesthit")]
 void main(inout Payload payload, BuiltInTriangleIntersectionAttributes attr)
 {
-	float3 barycentrics = float3(1 - attr.barycentrics.x - attr.barycentrics.y, attr.barycentrics.x, attr.barycentrics.y);
-	Payload temp = { float4(barycentrics, 1) };
-	payload = temp;
+	if (payload.mode == 0) {
+		payload.color = float4(1, 1, 1, 1);
+	}
+	else if (payload.mode == 1) {
+		float3 barycentrics = float3(1 - attr.barycentrics.x - attr.barycentrics.y, attr.barycentrics.x, attr.barycentrics.y);
+		payload.color = float4(barycentrics, 1);
+	}
+	else if (payload.mode == 2) {
+		uint id = PrimitiveIndex() % 8;
+		payload.color = ColorMap[NonUniformResourceIndex(id)].Load(int3(0, 0, 0));
+	}
+	else if (payload.mode == 3) {
+		uint id = InstanceIndex() % 8;
+		payload.color = ColorMap[NonUniformResourceIndex(id)].Load(int3(0, 0, 0));
+	}
 }
 )#";
 
 		static const char shaderCodeSceneMiss[] = R"#(
-struct Payload { float4 color; };
+struct Payload { float4 color; uint mode; };
 
 [shader("miss")]
 void main(inout Payload payload)
 {
-	Payload temp = { float4(0.5, 0.5, 0.5, 1) };
-	payload = temp;
+	payload.color = float4(0.3, 0.3, 0.3, 1);
 }
 )#";
 
@@ -352,8 +370,8 @@ void main(inout Payload payload)
 			hitGroup->SetClosestHitShaderImport(L"MyClosestHit");
 
 			auto shaderConfig = rtDesc.CreateSubobject<CD3DX12_RAYTRACING_SHADER_CONFIG_SUBOBJECT>();
-			UINT payloadSize = 4 * sizeof(float);   // float4 color
-			UINT attributeSize = 2 * sizeof(float); // float2 barycentrics
+			UINT payloadSize = 4 * sizeof(float) + 1 * sizeof(unsigned);   // color + mode
+			UINT attributeSize = 2 * sizeof(float); // barycentrics
 			shaderConfig->Config(payloadSize, attributeSize);
 
 			auto pipelineConfig = rtDesc.CreateSubobject<CD3DX12_RAYTRACING_PIPELINE_CONFIG_SUBOBJECT>();
@@ -366,8 +384,15 @@ void main(inout Payload payload)
 			auto rootSigAssociation = rtDesc.CreateSubobject<CD3DX12_SUBOBJECT_TO_EXPORTS_ASSOCIATION_SUBOBJECT>();
 			rootSigAssociation->SetSubobjectToAssociate(*rootSigLocal);
 			rootSigAssociation->AddExport(L"MyRayGen");
-			rootSigAssociation->AddExport(L"MyClosestHit"); // On PIX null local signatures show warnings...
-			rootSigAssociation->AddExport(L"MyMiss");
+#if 1
+			// On PIX unbind local signatures show warnings...
+			auto rootSigLocalNull = rtDesc.CreateSubobject<CD3DX12_LOCAL_ROOT_SIGNATURE_SUBOBJECT>();
+			rootSigLocalNull->SetRootSignature(mSceneRootSigLocalNull.Get());
+			auto rootSigNullAssociation = rtDesc.CreateSubobject<CD3DX12_SUBOBJECT_TO_EXPORTS_ASSOCIATION_SUBOBJECT>();
+			rootSigNullAssociation->SetSubobjectToAssociate(*rootSigLocalNull);
+			rootSigNullAssociation->AddExport(L"MyClosestHit");
+			rootSigNullAssociation->AddExport(L"MyMiss");
+#endif
 
 			// Global root signature is also optional, but it seems nessesary in most cases
 			auto rootSigGlobal = rtDesc.CreateSubobject<CD3DX12_GLOBAL_ROOT_SIGNATURE_SUBOBJECT>();
@@ -379,28 +404,27 @@ void main(inout Payload payload)
 		// Shader Table
 
 		{
-			uint32_t rayGenLocalRootConstantValue = 123; // todo
-
 			CHK(mStateObject.As(&mStateObjectProps));
 			void* pRayGenID = mStateObjectProps->GetShaderIdentifier(L"MyRayGen");
 			void* pMissID = mStateObjectProps->GetShaderIdentifier(L"MyMiss");
 			void* pHitGroupID = mStateObjectProps->GetShaderIdentifier(L"MyHitGroup");
 
-			uint8_t* sbt = (uint8_t*)alloca(oMax);
+			mShaderBindingTableDefaultData = std::make_unique<uint8_t[]>(oMax);
+			uint8_t* sbt = mShaderBindingTableDefaultData.get();
 			memset(sbt, 0, oMax); // zero fill
 			memcpy(sbt + oRayGen, pRayGenID, D3D12_SHADER_IDENTIFIER_SIZE_IN_BYTES);
-			memcpy(sbt + oRayGenRootConstant, &rayGenLocalRootConstantValue, sizeof(rayGenLocalRootConstantValue));
+			memset(sbt + oRayGenRootConstant, 0, sizeof(uint32_t));
 			memcpy(sbt + oHitGroup, pHitGroupID, D3D12_SHADER_IDENTIFIER_SIZE_IN_BYTES);
 			memcpy(sbt + oMiss, pMissID, D3D12_SHADER_IDENTIFIER_SIZE_IN_BYTES);
 
-			auto heapProp = CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_UPLOAD);
-			auto resDesc = CD3DX12_RESOURCE_DESC::Buffer(oMax);
-			CHK(mDevice->CreateCommittedResource(
-				&heapProp, D3D12_HEAP_FLAG_NONE, &resDesc,
-				D3D12_RESOURCE_STATE_GENERIC_READ, nullptr, IID_PPV_ARGS(&mShaderBindingTable)));
-			void* gpuMem;
-			CHK(mShaderBindingTable->Map(0, nullptr, &gpuMem));
-			memcpy(gpuMem, sbt, oMax);
+			for (auto& sbtr : mShaderBindingTable)
+			{
+				auto heapProp = CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_UPLOAD);
+				auto resDesc = CD3DX12_RESOURCE_DESC::Buffer(oMax);
+				CHK(mDevice->CreateCommittedResource(
+					&heapProp, D3D12_HEAP_FLAG_NONE, &resDesc,
+					D3D12_RESOURCE_STATE_GENERIC_READ, nullptr, IID_PPV_ARGS(&sbtr)));
+			}
 		}
 
 		// Resources
@@ -568,13 +592,6 @@ void main(inout Payload payload)
 			D3D12_RESOURCE_STATE_GENERIC_READ, nullptr, IID_PPV_ARGS(&mIB)));
 		CHK(mIB->Map(0, nullptr, &gpuMem));
 		memcpy(gpuMem, indices.data(), sizeIB);
-
-		mVBView.BufferLocation = mVB->GetGPUVirtualAddress();
-		mVBView.StrideInBytes = sizeof(VertexElement);
-		mVBView.SizeInBytes = sizeVB;
-		mIBView.BufferLocation = mIB->GetGPUVirtualAddress();
-		mIBView.Format = DXGI_FORMAT_R16_UINT;
-		mIBView.SizeInBytes = sizeIB;
 
 		// Generate plane triangles
 		vertices.clear();
@@ -776,6 +793,9 @@ void main(inout Payload payload)
 		CHK(mConstantBuffer[mFrameCount % BUFFER_COUNT]->Map(0, nullptr, reinterpret_cast<void**>(&pCB)));
 		float* pCBSceneMatrix = pCB + 256 * (int)Constants::SceneMatrix / sizeof(*pCB);
 
+		uint8_t* pSBT;
+		CHK(mShaderBindingTable[mFrameCount % BUFFER_COUNT]->Map(0, nullptr, reinterpret_cast<void**>(&pSBT)));
+
 		CD3DX12_GPU_DESCRIPTOR_HANDLE svBase(mShaderView[mFrameCount % BUFFER_COUNT]->GetGPUDescriptorHandleForHeapStart());
 		auto svScene = svBase;
 
@@ -803,6 +823,12 @@ void main(inout Payload payload)
 		sceneMatrix.cameraPos = mCameraPos;
 		memcpy(pCBSceneMatrix, &sceneMatrix, sizeof(sceneMatrix));
 
+		// Make shader binding table
+
+		memcpy(pSBT, mShaderBindingTableDefaultData.get(), oMax);
+		_mm_sfence(); // overwrite data to write combining memory so insert a fence
+		memcpy(pSBT + oRayGenRootConstant, &mRaytracingMode, sizeof(uint32_t));
+
 		// Start recording commands
 
 		CHK(mCmdAlloc[mFrameCount % BUFFER_COUNT]->Reset());
@@ -822,7 +848,7 @@ void main(inout Payload payload)
 		mCmdList->SetComputeRootDescriptorTable(0, svScene);
 		cmdList4->SetPipelineState1(mStateObject.Get());
 		D3D12_DISPATCH_RAYS_DESC drDesc = {};
-		drDesc.RayGenerationShaderRecord.StartAddress = mShaderBindingTable->GetGPUVirtualAddress();
+		drDesc.RayGenerationShaderRecord.StartAddress = mShaderBindingTable[mFrameCount % BUFFER_COUNT]->GetGPUVirtualAddress();
 		drDesc.RayGenerationShaderRecord.SizeInBytes = oHitGroup;
 		drDesc.HitGroupTable.StartAddress = drDesc.RayGenerationShaderRecord.StartAddress + oHitGroup;
 		drDesc.HitGroupTable.SizeInBytes = oMiss - oHitGroup;
@@ -881,7 +907,7 @@ private:
 	//DirectX::XMVECTOR mCameraPos = DirectX::XMVectorSet(0.0f, 0.0f, -4.0f, 0);
 	DirectX::XMVECTOR mCameraTarget = DirectX::XMVectorSet(0, 0, 0, 0);
 	DirectX::XMVECTOR mCameraUp = DirectX::XMVectorSet(0, 1, 0, 0);
-	float mBindlessTextureIndex = 0;
+	uint32_t mRaytracingMode = 1;
 
 public:
 	void MoveCamera(float forward, float trans, float rot)
@@ -918,10 +944,9 @@ public:
 		}
 	}
 
-	void ChangeTexture(bool forward)
+	void ChangeMode(uint32_t mode)
 	{
-		float newIndex = forward ? (mBindlessTextureIndex + 0.1f) : (mBindlessTextureIndex - 0.1f);
-		mBindlessTextureIndex = max(0.0f, min((float)MAX_BINDLESS_RESOURCE + 1.0f, newIndex));
+		mRaytracingMode = mode;
 	}
 };
 
@@ -1016,11 +1041,17 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int)
 					if (keyState['D'] & 0x80) {
 						d3d.MoveCamera(0, 0, -0.04f);
 					}
-					if (keyState[VK_RIGHT] & 0x80) {
-						d3d.ChangeTexture(true);
+					if (keyState['0'] & 0x80) {
+						d3d.ChangeMode(0);
 					}
-					if (keyState[VK_LEFT] & 0x80) {
-						d3d.ChangeTexture(false);
+					if (keyState['1'] & 0x80) {
+						d3d.ChangeMode(1);
+					}
+					if (keyState['2'] & 0x80) {
+						d3d.ChangeMode(2);
+					}
+					if (keyState['3'] & 0x80) {
+						d3d.ChangeMode(3);
 					}
 				}
 				d3d.Wait();
