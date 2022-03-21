@@ -10,6 +10,8 @@
 #include <iterator>
 #include <dxcapi.h>
 #include <dstorage.h>
+#include <thread>
+#include <atomic>
 
 #pragma comment(lib, "dxgi.lib")
 #pragma comment(lib, "d3d12.lib")
@@ -58,6 +60,10 @@ class D3D
 	ComPtr<IDStorageFactory> mDStorageFactory;
 	ComPtr<IDStorageQueue> mDStorageQueue;
 	ComPtr<IDStorageFile> mDStorageFile;
+	ComPtr<IDStorageCustomDecompressionQueue> mDStorageCustomDecomp;
+	HANDLE mDStorageCustomDecompSignalHandle = INVALID_HANDLE_VALUE;
+	std::thread mCustomDecompThread;
+	std::atomic<bool> mIsExit = false;
 
 	enum class Constants {
 		SceneMatrix,
@@ -124,6 +130,18 @@ class D3D
 		return ((val + align - 1) & ~(align - 1));
 	}
 
+	void EncodeDStorageData(uint8_t* data, size_t size)
+	{
+		for (size_t i = 0; i < size; ++i)
+			data[i] ^= 0xCD;
+	}
+
+	void DecodeDStorageData(uint8_t* data, size_t size)
+	{
+		for (size_t i = 0; i < size; ++i)
+			data[i] ^= 0xCD;
+	}
+
 public:
 	~D3D()
 	{
@@ -142,8 +160,13 @@ public:
 		mDStorageQueue->RetrieveErrorRecord(&rec);
 		CHK(rec.FirstFailure.HResult);
 
+		mIsExit.store(true);
+		SetEvent(mDStorageCustomDecompSignalHandle);
+		mCustomDecompThread.join();
+
 		mDStorageQueue->Close();
 		CloseHandle(mDStorageSignalHandle);
+		CloseHandle(mDStorageCustomDecompSignalHandle);
 	}
 
 	D3D(int width, int height, HWND hWnd)
@@ -346,6 +369,9 @@ float4 main(Input input) : SV_Target {
 				{0.5f, 0.5f, 0.5f, 1.0f},
 				{1.0f, 1.0f, 1.0f, 1.0f},
 			};
+			std::vector<uint8_t> data(sizeof(colors));
+			memcpy(data.data(), colors, sizeof(colors));
+			EncodeDStorageData(data.data(), sizeof(colors));
 
 			HANDLE fileHandle = CreateFile(filePath, GENERIC_READ | GENERIC_WRITE, 0,
 				NULL, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
@@ -354,7 +380,7 @@ float4 main(Input input) : SV_Target {
 			}
 			SetFilePointer(fileHandle, 0, 0, FILE_BEGIN);
 			DWORD writtenSize;
-			WriteFile(fileHandle, colors, (DWORD)sizeof(colors), &writtenSize, nullptr);
+			WriteFile(fileHandle, data.data(), (DWORD)data.size(), &writtenSize, nullptr);
 			CloseHandle(fileHandle);
 		}
 
@@ -380,6 +406,43 @@ float4 main(Input input) : SV_Target {
 		dstorageQueueDesc.SourceType = DSTORAGE_REQUEST_SOURCE_FILE;
 		dstorageQueueDesc.Name = "MyDStorage";
 		CHK(mDStorageFactory->CreateQueue(&dstorageQueueDesc, IID_PPV_ARGS(&mDStorageQueue)));
+
+		CHK(mDStorageFactory.As(&mDStorageCustomDecomp));
+		mDStorageCustomDecompSignalHandle = mDStorageCustomDecomp->GetEvent();
+
+		mCustomDecompThread = std::thread([this]() {
+			while (true)
+			{
+				WaitForSingleObject(mDStorageCustomDecompSignalHandle, INFINITE);
+				if (mIsExit)
+					break;
+				DSTORAGE_CUSTOM_DECOMPRESSION_REQUEST req[3];
+				UINT32 numReq;
+				CHK(mDStorageCustomDecomp->GetRequests(_countof(req), req, &numReq));
+				if (numReq == 0)
+					continue;
+				for (UINT32 i = 0; i < numReq; ++i)
+				{
+					if (req[i].CompressionFormat != DSTORAGE_CUSTOM_COMPRESSION_0)
+						throw runtime_error("Unknown compression format");
+					if (req[i].DstSize != req[i].SrcSize)
+						throw runtime_error("Unknown compression format");
+					// Destination is write-combine memory
+					std::vector<uint8_t> decomp(req[i].DstSize);
+					memcpy(decomp.data(), req[i].SrcBuffer, req[i].SrcSize);
+					DecodeDStorageData(decomp.data(), decomp.size());
+					memcpy(req[i].DstBuffer, decomp.data(), decomp.size());
+				}
+				DSTORAGE_CUSTOM_DECOMPRESSION_RESULT res[3];
+				for (UINT32 i = 0; i < numReq; ++i)
+				{
+					res[i].Id = req[i].Id;
+					res[i].Result = S_OK;
+				}
+				CHK(mDStorageCustomDecomp->SetRequestResults(numReq, res));
+			}
+			return;
+			});
 
 		CHK(mDStorageFactory->OpenFile(filePath, IID_PPV_ARGS(&mDStorageFile)));
 
@@ -423,6 +486,7 @@ float4 main(Input input) : SV_Target {
 			DSTORAGE_REQUEST req = {};
 			req.Options.SourceType = DSTORAGE_REQUEST_SOURCE_FILE;
 			req.Options.DestinationType = DSTORAGE_REQUEST_DESTINATION_TEXTURE_REGION;
+			req.Options.CompressionFormat = DSTORAGE_CUSTOM_COMPRESSION_0;
 			req.Source.File.Source = mDStorageFile.Get();
 			req.Source.File.Offset = i * sizeof(float[4]);
 			req.Source.File.Size = sizeof(float[4]);
