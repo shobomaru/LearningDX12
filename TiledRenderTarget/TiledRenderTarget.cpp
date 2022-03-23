@@ -7,6 +7,7 @@
 #include "d3dx12.h"
 
 #pragma comment(lib, "dxgi.lib")
+#pragma comment(lib, "dxguid.lib")
 #pragma comment(lib, "d3d12.lib")
 
 using namespace std;
