@@ -1,0 +1,2 @@
+xdg-open image.ppm
+
