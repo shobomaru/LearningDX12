@@ -3,10 +3,10 @@
 #include <vector>
 #include <stdexcept>
 #define INITGUID
-#include <wrladapter.h>
-#include <dxcore.h>
-#include <d3d12.h>
-#include <dxguids.h>
+#include <wsl/wrladapter.h>
+#include <directx/dxcore.h>
+#include <directx/d3d12.h>
+#include <dxguids/dxguids.h>
 
 using namespace std;
 using namespace Microsoft::WRL;
