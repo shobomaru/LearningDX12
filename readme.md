@@ -7,7 +7,7 @@ Just my training
 
 Windows 10, 11 (64bit)  
 Latest graphics driver  
-VisualStudio 2019  
+VisualStudio 2022  
 
 ### WSL2
 
