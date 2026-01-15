@@ -626,6 +626,8 @@ float4 main(Input input) : SV_Target {
 		renderPassDS.DepthBeginningAccess.Type = D3D12_RENDER_PASS_BEGINNING_ACCESS_TYPE_CLEAR;
 		renderPassDS.DepthBeginningAccess.Clear.ClearValue = CD3DX12_CLEAR_VALUE(DXGI_FORMAT_D32_FLOAT, kDefaultDSClearColor[0], 0);
 		renderPassDS.DepthEndingAccess.Type = D3D12_RENDER_PASS_ENDING_ACCESS_TYPE_PRESERVE;
+		renderPassDS.StencilBeginningAccess.Type = D3D12_RENDER_PASS_BEGINNING_ACCESS_TYPE_NO_ACCESS;
+		renderPassDS.StencilEndingAccess.Type = D3D12_RENDER_PASS_ENDING_ACCESS_TYPE_NO_ACCESS;
 		mCmdList->BeginRenderPass(0, &renderPassRT, &renderPassDS, D3D12_RENDER_PASS_FLAG_NONE);
 
 		//mCmdList->ClearDepthStencilView(dsvShadow, D3D12_CLEAR_FLAG_DEPTH, kDefaultDSClearColor[0], 0, 0, nullptr);
@@ -663,6 +665,8 @@ float4 main(Input input) : SV_Target {
 		renderPassDS.DepthBeginningAccess.Type = D3D12_RENDER_PASS_BEGINNING_ACCESS_TYPE_CLEAR;
 		renderPassDS.DepthBeginningAccess.Clear.ClearValue = CD3DX12_CLEAR_VALUE(DXGI_FORMAT_D32_FLOAT, kDefaultDSClearColor[0], 0);
 		renderPassDS.DepthEndingAccess.Type = D3D12_RENDER_PASS_ENDING_ACCESS_TYPE_DISCARD;
+		renderPassDS.StencilBeginningAccess.Type = D3D12_RENDER_PASS_BEGINNING_ACCESS_TYPE_NO_ACCESS;
+		renderPassDS.StencilEndingAccess.Type = D3D12_RENDER_PASS_ENDING_ACCESS_TYPE_NO_ACCESS;
 		mCmdList->BeginRenderPass(1, &renderPassRT, &renderPassDS, D3D12_RENDER_PASS_FLAG_NONE);
 
 		//mCmdList->ClearRenderTargetView(rtvScene, kDefaultRTClearColor, 0, nullptr);
